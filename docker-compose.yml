@@ -1,0 +1,15 @@
+services:
+  ya-gorod-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ya-gorod-app
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.yagorod.rule=Host(`ya-gorod.example.ru`)"
+    #   - "traefik.http.routers.yagorod.entrypoints=websecure"
+    #   - "traefik.http.routers.yagorod.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.yagorod.loadbalancer.server.port=80"
