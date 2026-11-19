@@ -26,6 +26,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://yagorod:yagorod_secret@db:5432/yagorod
+      TG_CHANNELS: noyabrsk_adm,noyabrsk24
+      PARSE_INTERVAL_SECONDS: '300'
     ports:
       - "8000:8000"
     volumes:

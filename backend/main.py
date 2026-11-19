@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -8,7 +9,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import JSON, text, Boolean, Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://yagorod:yagorod@db:5432/yagorod")
@@ -59,6 +60,7 @@ class EventDB(Base):
     sessions = Column(JSON, default=list)  # [{"date": "YYYY-MM-DD", "startTime": "19:00", "endTime": "21:00"}]
     period_start = Column(String, nullable=True)
     period_end = Column(String, nullable=True)
+    source_url = Column(String, nullable=True, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -213,11 +215,29 @@ def seed_initial_data():
         db.close()
 
 
+from parser import run_parse_cycle
+
+async def _parser_background_loop():
+    interval = int(os.getenv("PARSE_INTERVAL_SECONDS", "300"))
+    while True:
+        db = SessionLocal()
+        try:
+            await run_parse_cycle(db, EventDB, NewsDB)
+        except Exception as exc:
+            print("Parser error:", exc)
+        finally:
+            db.close()
+        await asyncio.sleep(interval)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS source_url VARCHAR"))
     seed_initial_data()
+    task = asyncio.create_task(_parser_background_loop())
     yield
+    task.cancel()
 
 
 app = FastAPI(title="Ya-Gorod API", version="1.0.0", lifespan=lifespan)
@@ -308,3 +328,9 @@ async def create_proposal(
     db.commit()
     db.refresh(proposal)
     return {"id": proposal.id, "files": saved_urls}
+
+
+@app.post("/api/parser/run")
+async def trigger_parser(db: Session = Depends(get_db)):
+    result = await run_parse_cycle(db, EventDB, NewsDB)
+    return {"status": "ok", **result}

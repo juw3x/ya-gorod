@@ -4,7 +4,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=120 --retries=10 -r requirements.txt
 
-COPY main.py .
+COPY *.py .
 RUN mkdir -p /app/media
 
 EXPOSE 8000

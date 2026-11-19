@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/utils/noyabrsk_time.dart';
@@ -38,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<_AfishaEntry> _allEntries = [];
 
   int _visibleCount = 20;
+  Timer? _autoRefreshTimer;
   bool _isLoading = true;
   String? _loadError;
 
@@ -47,6 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ScrollBus.homeTop.addListener(_onScrollToTop);
     ScrollBus.homeAfisha.addListener(_onScrollToAfisha);
     _loadHome();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 60), (_) => _loadHome(silent: true));
   }
 
   void _onScrollToTop() {
@@ -62,11 +65,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _loadHome() async {
-    setState(() {
-      _isLoading = true;
-      _loadError = null;
-    });
+  Future<void> _loadHome({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _loadError = null;
+      });
+    }
     try {
       final data = await ApiRepository.fetchHome();
       if (!mounted) return;
@@ -117,6 +122,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel();
     ScrollBus.homeTop.removeListener(_onScrollToTop);
     ScrollBus.homeAfisha.removeListener(_onScrollToAfisha);
     _scrollController.dispose();
