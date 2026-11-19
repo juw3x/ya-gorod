@@ -1,11 +1,26 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/utils/noyabrsk_time.dart';
+import '../../core/utils/scroll_bus.dart';
 import '../../data/models/event_model.dart';
 import '../../data/models/home_models.dart';
-import '../../data/repositories/mock_home_repository.dart';
+import '../../data/repositories/api_repository.dart';
 import 'widgets/banner_slider.dart';
 import 'widgets/stories_section.dart';
+
+class _AfishaEntry {
+  final DateTime groupDate;
+  final EventModel event;
+  final String? timeLabel;
+  final String? periodRangeLabel;
+
+  const _AfishaEntry({
+    required this.groupDate,
+    required this.event,
+    this.timeLabel,
+    this.periodRangeLabel,
+  });
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,219 +30,259 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _repo = MockHomeRepository();
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _afishaKey = GlobalKey();
+
+  List<StoryItem> _stories = [];
+  List<BannerItem> _banners = [];
+  List<_AfishaEntry> _allEntries = [];
+
+  int _visibleCount = 20;
+  bool _isLoading = true;
+  String? _loadError;
 
   @override
-  Widget build(BuildContext context) {
-    final stories = _repo.getStories();
-    final sliderBanners = _repo.getSliderBanners();
-    final adBanners = _repo.getAfishaAdBanners();
-    final events = _repo.getEvents();
-    final now = NoyabrskTime.now();
+  void initState() {
+    super.initState();
+    ScrollBus.homeTop.addListener(_onScrollToTop);
+    ScrollBus.homeAfisha.addListener(_onScrollToAfisha);
+    _loadHome();
+  }
 
-    // Разворачиваем события в плоский список пар (Дата, Мероприятие, Время)
-    final items = <_AfishaCardEntry>[];
-    for (final event in events) {
-      for (final session in event.sessions) {
-        if (!session.isCompleted(now)) {
-          items.add(_AfishaCardEntry(date: session.date, startTime: session.startTime, event: event));
-        }
-      }
+  void _onScrollToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
     }
+  }
 
-    // Сортировка: по дате, внутри даты по времени (без времени — в конце)[cite: 14]
-    items.sort((a, b) {
-      final dateCmp = a.date.compareTo(b.date);
-      if (dateCmp != 0) return dateCmp;
-      if (a.startTime == null && b.startTime == null) return 0;
-      if (a.startTime == null) return 1;
-      if (b.startTime == null) return -1;
-      return a.startTime!.compareTo(b.startTime!);
+  void _onScrollToAfisha() {
+    final ctx = _afishaKey.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
+    }
+  }
+
+  Future<void> _loadHome() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
     });
+    try {
+      final data = await ApiRepository.fetchHome();
+      if (!mounted) return;
+      setState(() {
+        _stories = data.stories;
+        _banners = data.banners;
+        _allEntries = _buildEntries(data.events);
+        _visibleCount = 20;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError = 'Не удалось подключиться к API. Проверьте сеть и попробуйте снова.';
+      });
+    }
+  }
 
-    // Формируем ленту с заголовками дат и рекламой (перед 1-й, после 4-й, 8-й...)[cite: 14, 16]
-    final feedWidgets = <Widget>[];
-    DateTime? lastDate;
-    int cardCounter = 0;
-    int adIndex = 0;
+  List<_AfishaEntry> _buildEntries(List<EventModel> events) {
+    final now = NoyabrskTime.now();
+    final today = NoyabrskTime.dateOnly(now);
+    final entries = <_AfishaEntry>[];
 
-    for (final entry in items) {
-      if (lastDate == null || lastDate != entry.date) {
-        lastDate = entry.date;
-        feedWidgets.add(_DateHeader(date: entry.date));
+    for (final event in events) {
+      if (event.scheduleType == ScheduleType.period && event.periodStart != null && event.periodEnd != null) {
+        final start = NoyabrskTime.dateOnly(event.periodStart!);
+        final end = NoyabrskTime.dateOnly(event.periodEnd!);
+        if (today.isAfter(end)) continue;
+        final groupDate = today.isBefore(start) ? start : today;
+        final rangeLabel = '${NoyabrskTime.formatShortDate(start)} — ${NoyabrskTime.formatShortDate(end)}';
+        entries.add(_AfishaEntry(groupDate: groupDate, event: event, periodRangeLabel: rangeLabel));
+      } else {
+        for (final session in event.sessions) {
+          if (session.isCompleted(now)) continue;
+          entries.add(_AfishaEntry(
+            groupDate: NoyabrskTime.dateOnly(session.date),
+            event: event,
+            timeLabel: session.startTime,
+          ));
+        }
       }
-
-      // Врезка рекламы перед 1-й (counter == 0) и далее каждые 4 карточки[cite: 16]
-      if (cardCounter % 4 == 0 && adIndex < adBanners.length) {
-        feedWidgets.add(_InlineAdCard(banner: adBanners[adIndex]));
-        adIndex++;
-      }
-
-      feedWidgets.add(_EventCard(entry: entry));
-      cardCounter++;
     }
 
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
-      children: [
-        StoriesSection(stories: stories),
-        const SizedBox(height: 8),
-        BannerSlider(banners: sliderBanners),
-        const SizedBox(height: 20),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
-          child: Text('Афиша города', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-        ),
-        if (feedWidgets.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(32),
-            child: Center(child: Text('Нет мероприятий', style: TextStyle(color: Colors.grey))),
-          )
-        else
-          ...feedWidgets,
-      ],
-    );
+    entries.sort((a, b) => a.groupDate.compareTo(b.groupDate));
+    return entries;
   }
-}
 
-class _AfishaCardEntry {
-  final DateTime date;
-  final String? startTime;
-  final EventModel event;
-  _AfishaCardEntry({required this.date, this.startTime, required this.event});
-}
-
-class _DateHeader extends StatelessWidget {
-  final DateTime date;
-  const _DateHeader({required this.date});
+  @override
+  void dispose() {
+    ScrollBus.homeTop.removeListener(_onScrollToTop);
+    ScrollBus.homeAfisha.removeListener(_onScrollToAfisha);
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Text(
-        NoyabrskTime.formatAfishaDate(date),
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+    if (_isLoading && _allEntries.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_loadError != null && _allEntries.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+              const SizedBox(height: 12),
+              Text(_loadError!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.black54)),
+              const SizedBox(height: 16),
+              ElevatedButton(onPressed: _loadHome, child: const Text('Повторить')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final displayed = _allEntries.take(_visibleCount).toList();
+    final widgets = <Widget>[
+      const SizedBox(height: 12),
+      StoriesSection(stories: _stories),
+      const SizedBox(height: 16),
+      BannerSlider(banners: _banners),
+      const SizedBox(height: 20),
+      Padding(
+        key: _afishaKey,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: const Text('Афиша мероприятий', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
       ),
+      const SizedBox(height: 12),
+    ];
+
+    DateTime? lastDate;
+    for (var i = 0; i < displayed.length; i++) {
+      final entry = displayed[i];
+      if (i == 0) widgets.add(_buildAdBanner(1));
+      if (lastDate == null || lastDate != entry.groupDate) {
+        lastDate = entry.groupDate;
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Text(
+              NoyabrskTime.formatAfishaDate(entry.groupDate),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF2B3A67)),
+            ),
+          ),
+        );
+      }
+      widgets.add(_EventCard(entry: entry));
+      if ((i + 1) % 4 == 0) widgets.add(_buildAdBanner(((i + 1) ~/ 4) + 1));
+    }
+
+    if (_visibleCount < _allEntries.length) {
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: OutlinedButton(
+            onPressed: () => setState(() => _visibleCount += 20),
+            child: const Text('Больше мероприятий'),
+          ),
+        ),
+      );
+    } else {
+      widgets.add(const SizedBox(height: 24));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadHome,
+      child: ListView(controller: _scrollController, children: widgets),
     );
   }
-}
 
-class _InlineAdCard extends StatelessWidget {
-  final BannerModel banner;
-  const _InlineAdCard({required this.banner});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        if (banner.linkUrl != null) {
-          launchUrl(Uri.parse(banner.linkUrl!), mode: LaunchMode.externalApplication);
-        }
-      },
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.grey.shade300),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('РЕКЛАМА', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                  const SizedBox(height: 4),
-                  Text(banner.title ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  if (banner.subtitle != null)
-                    Text(banner.subtitle!, style: const TextStyle(fontSize: 13, color: Colors.black54)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.image_outlined, color: Colors.grey),
-            ),
-          ],
-        ),
+  Widget _buildAdBanner(int number) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE9EEF5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFD0D9E6)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.campaign_outlined, color: Color(0xFF2B3A67)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text('Рекламный блок #$number — партнёры «Я-Город»', style: const TextStyle(fontSize: 13)),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _EventCard extends StatelessWidget {
-  final _AfishaCardEntry entry;
+  final _AfishaEntry entry;
   const _EventCard({required this.entry});
 
   @override
   Widget build(BuildContext context) {
     final event = entry.event;
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 86,
-            height: 100,
-            decoration: BoxDecoration(color: const Color(0xFFE5E7EB), borderRadius: BorderRadius.circular(10)),
-            child: const Icon(Icons.image_outlined, color: Colors.grey),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        event.title,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: const Color(0xFFF3F4F6), borderRadius: BorderRadius.circular(6)),
-                      child: Text(event.ageRating, style: const TextStyle(fontSize: 11, color: Colors.black54)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(event.venueName, style: const TextStyle(fontSize: 13, color: Colors.black54)),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${event.category} • ${event.formattedPrice}',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Text(
-                      entry.startTime ?? 'Время уточняется',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ],
+    return GestureDetector(
+      onTap: () => context.push('/home/event', extra: event),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
+        child: Row(
+          children: [
+            Container(
+              width: 76,
+              height: 76,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(color: const Color(0xFFE5E7EB), borderRadius: BorderRadius.circular(10)),
+              child: event.coverUrl != null
+                  ? Image.network(
+                      event.coverUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(Icons.event, color: Colors.grey),
+                    )
+                  : const Icon(Icons.event, color: Colors.grey),
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(event.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  Text(event.venueName, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${event.category} • ${event.formattedPrice}',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        entry.periodRangeLabel ?? entry.timeLabel ?? 'Время уточняется',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF2B3A67)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,4 +1,36 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: ya-gorod-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yagorod
+      POSTGRES_PASSWORD: yagorod_secret
+      POSTGRES_DB: yagorod
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yagorod -d yagorod"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ya-gorod-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://yagorod:yagorod_secret@db:5432/yagorod
+    ports:
+      - "8000:8000"
+    volumes:
+      - media_data:/app/media
+
   ya-gorod-app:
     build:
       context: .
@@ -7,9 +39,7 @@ services:
     restart: unless-stopped
     ports:
       - "8088:80"
-    # labels:
-    #   - "traefik.enable=true"
-    #   - "traefik.http.routers.yagorod.rule=Host(`ya-gorod.example.ru`)"
-    #   - "traefik.http.routers.yagorod.entrypoints=websecure"
-    #   - "traefik.http.routers.yagorod.tls.certresolver=letsencrypt"
-    #   - "traefik.http.services.yagorod.loadbalancer.server.port=80"
+
+volumes:
+  pgdata:
+  media_data:

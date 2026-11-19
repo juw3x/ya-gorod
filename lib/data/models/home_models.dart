@@ -1,43 +1,49 @@
-enum BannerType { info, ad }
+import '../../core/network/api_client.dart';
 
-class StoryModel {
+class StoryItem {
   final String id;
   final String title;
-  final String? coverUrl;
+  final String? previewUrl;
   final String? mediaUrl;
   final bool isVideo;
-  final String shortCaption;
-  final String? fullDescription;
-  final int sortOrder;
 
-  const StoryModel({
+  const StoryItem({
     required this.id,
     required this.title,
-    this.coverUrl,
+    this.previewUrl,
     this.mediaUrl,
     this.isVideo = false,
-    required this.shortCaption,
-    this.fullDescription,
-    required this.sortOrder,
   });
+
+  factory StoryItem.fromJson(Map<String, dynamic> json) => StoryItem(
+        id: json['id'].toString(),
+        title: json['title'] ?? '',
+        previewUrl: ApiClient.resolveMediaUrl(json['preview_url']),
+        mediaUrl: ApiClient.resolveMediaUrl(json['media_url']),
+        isVideo: json['is_video'] == true,
+      );
 }
 
-class BannerModel {
+class BannerItem {
   final String id;
-  final BannerType type;
-  final String? title;
-  final String? subtitle;
+  final String title;
+  final String subtitle;
   final String? imageUrl;
-  final String? linkUrl;
-  final int sortOrder;
+  final String? targetUrl;
 
-  const BannerModel({
+  const BannerItem({
     required this.id,
-    required this.type,
-    this.title,
-    this.subtitle,
+    required this.title,
+    required this.subtitle,
     this.imageUrl,
-    this.linkUrl,
-    required this.sortOrder,
+    this.targetUrl,
   });
+
+  factory BannerItem.fromJson(Map<String, dynamic> json) => BannerItem(
+        id: json['id'].toString(),
+        title: json['title'] ?? '',
+        subtitle: json['subtitle'] ?? '',
+        imageUrl: ApiClient.resolveMediaUrl(json['image_url']),
+        targetUrl: json['target_url'],
+      );
 }

@@ -1,3 +1,5 @@
+import '../../core/network/api_client.dart';
+
 enum NewsCategory { all, official, city }
 
 class NewsItem {
@@ -16,6 +18,15 @@ class NewsItem {
     required this.externalUrl,
     this.coverUrl,
   });
+
+  factory NewsItem.fromJson(Map<String, dynamic> json) => NewsItem(
+        id: json['id'].toString(),
+        title: json['title'] ?? '',
+        category: json['category'] == 'official' ? NewsCategory.official : NewsCategory.city,
+        publishedAtLabel: json['published_at_label'] ?? '',
+        externalUrl: json['external_url'] ?? '',
+        coverUrl: ApiClient.resolveMediaUrl(json['cover_url']),
+      );
 
   String get categoryLabel => category == NewsCategory.official ? 'Официальные' : 'Городские';
 }
