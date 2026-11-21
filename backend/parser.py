@@ -7,14 +7,24 @@ import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
-AFISHA_CHANNELS = {"afisha_noyabrsk", "art_mikser"}
+AFISHA_CHANNELS = {"afisha_noyabrsk"}
 OFFICIAL_CHANNELS = {"noyabrsk_adm", "yanao_ru"}
 
-STRONG_EVENT_KEYWORDS = (
-    "афиша", "билеты", "вход свободный", "приглашаем",
-    "мастер-класс", "кинопоказ", "спектакль", "концерт",
+EVENT_TOPICS = (
+    "афиша", "мастер-класс", "кинопоказ", "спектакль", "концерт",
     "выставка", "фестиваль", "ярмарка", "турнир", "квартирник",
-    "состоится", "пройдет", "пройдёт",
+    "экскурси", "соревнован", "лекция", "квиз",
+)
+
+ANNOUNCEMENT_MARKERS = (
+    "билет", "вход свободный", "вход бесплатный", "приглашаем",
+    "начало в", "регистрация", "запись по", "место проведения",
+    "состоится", "пройдет", "пройдёт", "ждем вас", "ждём вас",
+)
+
+DATE_PATTERN = re.compile(
+    r"\b\d{1,2}\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b"
+    r"|\b([01]?\d|2[0-3]):([0-5]\d)\b"
 )
 
 PAST_TENSE_STOPWORDS = (
@@ -35,11 +45,12 @@ CATEGORY_MAP = {
     "ярмарк": "Ярмарка",
     "спорт": "Спорт",
     "турнир": "Спорт",
+    "соревнован": "Спорт",
 }
 
 
 def get_channels() -> List[str]:
-    raw = os.getenv("TG_CHANNELS", "art_mikser,yanao_ru,mig_noyabrsk,noyabrsk_info")
+    raw = os.getenv("TG_CHANNELS", "yanao_ru,mig_noyabrsk,noyabrsk_info")
     return [c.strip().lstrip("@") for c in raw.split(",") if c.strip()]
 
 
@@ -75,11 +86,13 @@ def _extract_bg_url(el) -> Optional[str]:
 
 
 def _is_event_post(channel: str, text_lower: str) -> bool:
-    if channel.lower() in AFISHA_CHANNELS:
-        return True
     if any(sw in text_lower for sw in PAST_TENSE_STOPWORDS):
         return False
-    return any(k in text_lower for k in STRONG_EVENT_KEYWORDS)
+    if channel.lower() in AFISHA_CHANNELS:
+        return True
+    has_topic = any(k in text_lower for k in EVENT_TOPICS)
+    has_announcement = any(m in text_lower for m in ANNOUNCEMENT_MARKERS) or bool(DATE_PATTERN.search(text_lower))
+    return has_topic and has_announcement
 
 
 async def fetch_channel_posts(channel: str) -> List[Dict]:
@@ -92,7 +105,6 @@ async def fetch_channel_posts(channel: str) -> List[Dict]:
 
     soup = BeautifulSoup(resp.text, "html.parser")
     posts = []
-    is_afisha_ch = channel.lower() in AFISHA_CHANNELS
 
     for msg in soup.select(".tgme_widget_message_wrap"):
         link_el = msg.select_one("a.tgme_widget_message_date")
@@ -104,7 +116,10 @@ async def fetch_channel_posts(channel: str) -> List[Dict]:
         for br in text_el.find_all("br"):
             br.replace_with("\n")
         raw_text = text_el.get_text("", strip=False).strip()
-        if len(raw_text) < (5 if is_afisha_ch else 20):
+
+        # Отсекаем посты из одних эмодзи и слишком короткие
+        alnum_only = re.sub(r"[^А-Яа-яЁёA-Za-z0-9]", "", raw_text)
+        if len(alnum_only) < 20:
             continue
 
         lines = [re.sub(r"\s+", " ", ln).strip() for ln in raw_text.splitlines()]
