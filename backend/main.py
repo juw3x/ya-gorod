@@ -409,3 +409,17 @@ async def reset_and_reparse(db: Session = Depends(get_db)):
     db.commit()
     result = await run_parse_cycle(db, EventDB, NewsDB)
     return {"status": "ok", **result}
+
+from admin import create_admin_router
+app.include_router(
+    create_admin_router(
+        get_db=get_db,
+        StoryDB=StoryDB,
+        BannerDB=BannerDB,
+        EventDB=EventDB,
+        NewsDB=NewsDB,
+        ProposalDB=ProposalDB,
+        private_dir=PRIVATE_PROPOSALS_DIR,
+        run_parse_cycle=run_parse_cycle,
+    )
+)
