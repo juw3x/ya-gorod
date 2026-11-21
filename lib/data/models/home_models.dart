@@ -6,6 +6,7 @@ class StoryItem {
   final String? previewUrl;
   final String? mediaUrl;
   final bool isVideo;
+  final String? description;
 
   const StoryItem({
     required this.id,
@@ -13,6 +14,7 @@ class StoryItem {
     this.previewUrl,
     this.mediaUrl,
     this.isVideo = false,
+    this.description,
   });
 
   factory StoryItem.fromJson(Map<String, dynamic> json) => StoryItem(
@@ -21,6 +23,7 @@ class StoryItem {
         previewUrl: ApiClient.resolveMediaUrl(json['preview_url']),
         mediaUrl: ApiClient.resolveMediaUrl(json['media_url']),
         isVideo: json['is_video'] == true,
+      description: json['description']?.toString(),
       );
 }
 

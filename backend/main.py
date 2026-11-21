@@ -46,6 +46,7 @@ class StoryDB(Base):
     preview_url = Column(String, nullable=True)
     media_url = Column(String, nullable=True)
     is_video = Column(Boolean, default=False)
+    description = Column(Text, nullable=True)
 
 
 class BannerDB(Base):
@@ -242,6 +243,7 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS source_url VARCHAR"))
         conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS content TEXT"))
         conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS video_url VARCHAR"))
+        conn.execute(text("ALTER TABLE stories ADD COLUMN IF NOT EXISTS description TEXT"))
         conn.execute(text("DELETE FROM stories WHERE preview_url LIKE '%picsum.photos%'"))
         conn.execute(text("DELETE FROM banners WHERE image_url LIKE '%picsum.photos%'"))
         conn.execute(text("DELETE FROM events WHERE source_url IS NULL AND cover_url LIKE '%picsum.photos%'"))
@@ -283,6 +285,7 @@ def get_home(db: Session = Depends(get_db)):
                 "preview_url": n.cover_url,
                 "media_url": n.video_url or n.cover_url,
                 "is_video": bool(n.video_url),
+                "description": n.content or n.title,
             }
             for n in news_media
         ]

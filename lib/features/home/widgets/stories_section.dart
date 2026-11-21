@@ -78,6 +78,7 @@ class _StoryViewer extends StatefulWidget {
 
 class _StoryViewerState extends State<_StoryViewer> {
   late int _index;
+  bool _isExpanded = false;
   VideoPlayerController? _videoController;
 
   @override
@@ -109,10 +110,12 @@ class _StoryViewerState extends State<_StoryViewer> {
   void _step(int delta) {
     final next = _index + delta;
     if (next < 0 || next >= widget.stories.length) {
-      Navigator.pop(context);
       return;
     }
-    setState(() => _index = next);
+    setState(() {
+      _index = next;
+      _isExpanded = false;
+    });
     _initMedia();
   }
 
@@ -125,68 +128,149 @@ class _StoryViewerState extends State<_StoryViewer> {
   @override
   Widget build(BuildContext context) {
     final story = widget.stories[_index];
-    Widget content;
-
-    if (story.isVideo && _videoController != null && _videoController!.value.isInitialized) {
-      content = AspectRatio(
-        aspectRatio: _videoController!.value.aspectRatio,
-        child: VideoPlayer(_videoController!),
-      );
-    } else if (!story.isVideo && story.mediaUrl != null) {
-      content = Image.network(
-        story.mediaUrl!,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54, size: 64),
-      );
-    } else {
-      content = const CircularProgressIndicator(color: Colors.white);
-    }
+    final fullText = (story.description != null && story.description!.trim().isNotEmpty)
+        ? story.description!.trim()
+        : story.title;
+    final hasLongText = fullText.length > 75 || fullText.contains('\n');
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
+          fit: StackFit.expand,
           children: [
-            Center(child: content),
-            Row(
-              children: [
-                Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: () => _step(-1))),
-                Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: () => _step(1))),
-              ],
+            // Медиа (фото или видео)
+            Center(
+              child: story.isVideo && _videoController != null && _videoController!.value.isInitialized
+                  ? AspectRatio(
+                      aspectRatio: _videoController!.value.aspectRatio,
+                      child: VideoPlayer(_videoController!),
+                    )
+                  : (story.mediaUrl ?? story.previewUrl) != null
+                      ? Image.network(
+                          (story.mediaUrl ?? story.previewUrl)!,
+                          fit: BoxFit.contain,
+                          width: double.infinity,
+                          height: double.infinity,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54, size: 48),
+                        )
+                      : const Icon(Icons.auto_awesome, color: Colors.white54, size: 48),
             ),
+
+            // Зоны нажатия влево / вправо (работают, когда текст свёрнут)
+            if (!_isExpanded)
+              Row(
+                children: [
+                  Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: () => _step(-1))),
+                  Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: () => _step(1))),
+                ],
+              ),
+
+            // Верхний сегментный индикатор и кнопка закрытия
             Positioned(
-              top: 12,
-              left: 16,
-              right: 16,
-              child: Row(
-                children: List.generate(
-                  widget.stories.length,
-                  (i) => Expanded(
-                    child: Container(
-                      height: 3,
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      color: i <= _index ? Colors.white : Colors.white30,
+              top: 10,
+              left: 12,
+              right: 12,
+              child: Column(
+                children: [
+                  Row(
+                    children: List.generate(
+                      widget.stories.length,
+                      (i) => Expanded(
+                        child: Container(
+                          height: 3,
+                          margin: const EdgeInsets.symmetric(horizontal: 2),
+                          decoration: BoxDecoration(
+                            color: i == _index ? Colors.white : Colors.white38,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Container(
+                        decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                        child: IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Нижний блок с затемнением и раскрывающимся текстом
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                padding: const EdgeInsets.fromLTRB(16, 28, 16, 18),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: _isExpanded
+                        ? [Colors.black.withValues(alpha: 0.78), Colors.black.withValues(alpha: 0.92)]
+                        : [Colors.transparent, Colors.black.withValues(alpha: 0.72), Colors.black.withValues(alpha: 0.88)],
+                  ),
                 ),
-              ),
-            ),
-            Positioned(
-              top: 24,
-              right: 12,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 24,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
-                child: Text(story.title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_isExpanded)
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.55),
+                        child: SingleChildScrollView(
+                          child: Text(
+                            fullText,
+                            style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.45),
+                          ),
+                        ),
+                      )
+                    else
+                      Text(
+                        fullText,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35, fontWeight: FontWeight.w500),
+                      ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        if (hasLongText)
+                          GestureDetector(
+                            onTap: () => setState(() => _isExpanded = !_isExpanded),
+                            child: Text(
+                              _isExpanded ? 'Свернуть' : 'Ещё',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                decoration: TextDecoration.underline,
+                                decorationColor: Colors.white,
+                              ),
+                            ),
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        Text(
+                          '${_index + 1} / ${widget.stories.length}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
