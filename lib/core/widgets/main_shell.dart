@@ -1,7 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../utils/scroll_bus.dart';
+
+class YaLogoBadge extends StatelessWidget {
+  final double size;
+  const YaLogoBadge({super.key, this.size = 28});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF2B3A67), Color(0xFF4A62A8)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        'Я',
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: size * 0.62,
+          height: 1,
+        ),
+      ),
+    );
+  }
+}
 
 class MainShell extends StatelessWidget {
   final StatefulNavigationShell navigationShell;
@@ -26,9 +56,11 @@ class MainShell extends StatelessWidget {
         elevation: 0.5,
         title: Row(
           children: [
+            const YaLogoBadge(size: 28),
+            const SizedBox(width: 8),
             const Text(
               'Я-Город',
-              style: TextStyle(color: Color(0xFF2B3A67), fontWeight: FontWeight.w800, fontSize: 20),
+              style: TextStyle(color: Color(0xFF2B3A67), fontWeight: FontWeight.w800, fontSize: 19),
             ),
             const SizedBox(width: 10),
             Container(width: 1, height: 18, color: Colors.black12),
@@ -69,9 +101,9 @@ class AppBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isNoneSelected = currentIndex == null;
+    final isNoneSelected = currentIndex == null || currentIndex! > 1;
     return BottomNavigationBar(
-      currentIndex: currentIndex ?? 0,
+      currentIndex: isNoneSelected ? 0 : currentIndex!,
       onTap: onTap,
       backgroundColor: Colors.white,
       selectedItemColor: isNoneSelected ? Colors.grey : const Color(0xFF2B3A67),
@@ -80,7 +112,6 @@ class AppBottomNav extends StatelessWidget {
       items: const [
         BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: 'Главная'),
         BottomNavigationBarItem(icon: Icon(Icons.newspaper_outlined), activeIcon: Icon(Icons.newspaper), label: 'Новости'),
-        BottomNavigationBarItem(icon: Icon(Icons.add_circle_outline), activeIcon: Icon(Icons.add_circle), label: 'Предложить'),
       ],
     );
   }
@@ -126,12 +157,17 @@ class AppDrawer extends StatelessWidget {
             const Divider(height: 1),
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Text('Я-Город', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Color(0xFF2B3A67))),
-                  SizedBox(height: 2),
-                  Text('Городские события и возможности', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                  YaLogoBadge(size: 36),
+                  SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Я-Город', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF2B3A67))),
+                      Text('Городские события и новости', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -144,7 +180,7 @@ class AppDrawer extends StatelessWidget {
             ),
             ListTile(
               leading: const Icon(Icons.event_outlined),
-              title: const Text('Афиша мероприятий'),
+              title: const Text('Афиша города'),
               trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.black38),
               onTap: onSelectAfisha,
             ),
@@ -154,34 +190,11 @@ class AppDrawer extends StatelessWidget {
               trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.black38),
               onTap: () => onSelectTab(1),
             ),
-            ListTile(
-              leading: const Icon(Icons.add_box_outlined),
-              title: const Text('Предложить мероприятие'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.black38),
-              onTap: () => onSelectTab(2),
-            ),
             const Divider(),
             _sectionHeader('ИНФОРМАЦИЯ'),
             _docTile(context, 'Политика конфиденциальности', 'privacy'),
             _docTile(context, 'Политика обработки персональных данных', 'personal-data'),
             _docTile(context, 'Условия использования', 'terms'),
-            const Divider(),
-            _sectionHeader('КОНТАКТЫ'),
-            ListTile(
-              leading: const Icon(Icons.phone_outlined),
-              title: const Text('+7 (3496) 00-00-00'),
-              subtitle: const Text('Перейти в контакты'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/page/contacts');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.chat_bubble_outline, color: Color(0xFF2B3A67)),
-              title: const Text('Мы в МАХ'),
-              trailing: const Icon(Icons.open_in_new, size: 16),
-              onTap: () => launchUrl(Uri.parse('https://max.ru'), mode: LaunchMode.externalApplication),
-            ),
             const Divider(),
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 8, 16, 16),

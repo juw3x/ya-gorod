@@ -270,10 +270,42 @@ def health():
 
 @app.get("/api/home")
 def get_home(db: Session = Depends(get_db)):
+    events = db.query(EventDB).order_by(EventDB.created_at.desc()).all()
+    stories = db.query(StoryDB).all()
+    banners = db.query(BannerDB).all()
+
+    if not stories:
+        news_media = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).limit(6).all()
+        stories = [
+            {
+                "id": n.id,
+                "title": n.title[:28] + ("…" if len(n.title) > 28 else ""),
+                "preview_url": n.cover_url,
+                "media_url": n.video_url or n.cover_url,
+                "is_video": bool(n.video_url),
+            }
+            for n in news_media
+        ]
+
+    if not banners:
+        src = [e for e in events if e.cover_url][:3]
+        if not src:
+            src = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).limit(3).all()
+        banners = [
+            {
+                "id": item.id,
+                "title": item.title[:50],
+                "subtitle": getattr(item, "venue_name", None) or getattr(item, "published_at_label", "Ноябрьск"),
+                "image_url": item.cover_url,
+                "target_url": getattr(item, "ticket_url", None) or getattr(item, "external_url", None),
+            }
+            for item in src
+        ]
+
     return {
-        "stories": db.query(StoryDB).all(),
-        "banners": db.query(BannerDB).all(),
-        "events": db.query(EventDB).order_by(EventDB.created_at.desc()).all(),
+        "stories": stories,
+        "banners": banners,
+        "events": events,
     }
 
 
