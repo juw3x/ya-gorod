@@ -1,17 +1,35 @@
-# ya_gorod
+# Я-Город (Ноябрьск)
 
-A new Flutter project.
+Мобильное приложение и бэкенд городского портала **«Я-Город»** для жителей и гостей Ноябрьска: актуальная афиша мероприятий, городские и официальные новости, сторис, баннеры и веб-админка для управления контентом.
 
-## Getting Started
+## Возможности
 
-This project is a starting point for a Flutter application.
+- **Главная страница:**
+  - Интерактивные **сторис** (фото и видео) с затемнённой подложкой и раскрывающимся текстом («Ещё» / «Свернуть»).
+  - **Слайдер баннеров** с автопереключением и переходом по внешним ссылкам.
+  - **Афиша города** с группировкой по датам по часовому поясу Ноябрьска (UTC+5), поддержкой расписаний (`одна дата`, `несколько дат`, `период`), пагинацией и автоматическим скрытием завершившихся событий.
+- **Детальная страница мероприятия:** обложка, фотогалерея, видео, расписание, площадка с переходом на карту и кнопка покупки билета; для завершённых событий отображается экран 404.
+- **Раздел «Новости»:** фильтрация («Все», «Официальные», «Городские»), счётчик, пагинация, встроенный просмотр полного текста и видео с переходом в первоисточник.
+- **Telegram-парсер:** автоматический фоновый сбор новостей и анонсов мероприятий из городских каналов с фильтрацией неактуальных постов.
+- **Веб-админ-панель (`/admin`):** авторизация по `HttpOnly` cookie, добавление/удаление сторис, баннеров и событий с загрузкой файлов или по URL, управление новостями, ручной запуск парсера и защищённый просмотр заявок.
 
-A few resources to get you started if this is your first Flutter project:
+## Стек технологий
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+- **Mobile:** Flutter (Dart), `go_router`, `video_player`, `url_launcher`
+- **Backend:** Python, FastAPI, SQLAlchemy, BeautifulSoup4, HTTPX
+- **Database:** PostgreSQL (Neon)
+- **Hosting & CI/CD:** Render (Backend), GitHub Actions (автосборка релизного APK на Java 21)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Структура проекта
+
+```text
+├── lib/                    # Исходный код Flutter-приложения
+│   ├── core/               # Роутинг, навигация, шапка, меню, утилиты времени Ноябрьска
+│   ├── data/               # Модели и API-клиент
+│   └── features/           # Экраны: home, news, event_detail, static_pages, not_found
+├── backend/                # FastAPI-сервер
+│   ├── main.py             # API-эндпоинты, модели БД, серверная валидация
+│   ├── parser.py           # Фоновый парсер Telegram-каналов
+│   └── admin.py            # Веб-админка с авторизацией и загрузкой файлов
+└── .github/workflows/      # CI/CD пайплайн сборки APK
+
