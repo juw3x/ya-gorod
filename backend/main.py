@@ -273,41 +273,57 @@ def health():
 @app.get("/api/home")
 def get_home(db: Session = Depends(get_db)):
     events = db.query(EventDB).order_by(EventDB.created_at.desc()).all()
-    stories = db.query(StoryDB).all()
-    banners = db.query(BannerDB).all()
+    manual_stories = [
+        {
+            "id": s.id,
+            "title": s.title,
+            "preview_url": s.preview_url,
+            "media_url": s.media_url,
+            "is_video": bool(s.is_video),
+            "description": s.description or s.title,
+        }
+        for s in db.query(StoryDB).all()
+    ]
+    news_media = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).limit(6).all()
+    auto_stories = [
+        {
+            "id": n.id,
+            "title": n.title[:28] + ("…" if len(n.title) > 28 else ""),
+            "preview_url": n.cover_url,
+            "media_url": n.video_url or n.cover_url,
+            "is_video": bool(n.video_url),
+            "description": n.content or n.title,
+        }
+        for n in news_media
+    ]
 
-    if not stories:
-        news_media = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).limit(6).all()
-        stories = [
-            {
-                "id": n.id,
-                "title": n.title[:28] + ("…" if len(n.title) > 28 else ""),
-                "preview_url": n.cover_url,
-                "media_url": n.video_url or n.cover_url,
-                "is_video": bool(n.video_url),
-                "description": n.content or n.title,
-            }
-            for n in news_media
-        ]
-
-    if not banners:
-        src = [e for e in events if e.cover_url][:3]
-        if not src:
-            src = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).limit(3).all()
-        banners = [
-            {
-                "id": item.id,
-                "title": item.title[:50],
-                "subtitle": getattr(item, "venue_name", None) or getattr(item, "published_at_label", "Ноябрьск"),
-                "image_url": item.cover_url,
-                "target_url": getattr(item, "ticket_url", None) or getattr(item, "external_url", None),
-            }
-            for item in src
-        ]
+    manual_banners = [
+        {
+            "id": b.id,
+            "title": b.title,
+            "subtitle": b.subtitle,
+            "image_url": b.image_url,
+            "target_url": b.target_url,
+        }
+        for b in db.query(BannerDB).all()
+    ]
+    src = [e for e in events if e.cover_url][:3]
+    if not src:
+        src = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).limit(3).all()
+    auto_banners = [
+        {
+            "id": item.id,
+            "title": item.title[:50],
+            "subtitle": getattr(item, "venue_name", None) or getattr(item, "published_at_label", "Ноябрьск"),
+            "image_url": item.cover_url,
+            "target_url": getattr(item, "ticket_url", None) or getattr(item, "external_url", None),
+        }
+        for item in src
+    ]
 
     return {
-        "stories": stories,
-        "banners": banners,
+        "stories": manual_stories + auto_stories,
+        "banners": manual_banners + auto_banners,
         "events": events,
     }
 
@@ -422,6 +438,7 @@ app.include_router(
         EventDB=EventDB,
         NewsDB=NewsDB,
         ProposalDB=ProposalDB,
+        media_dir=MEDIA_DIR,
         private_dir=PRIVATE_PROPOSALS_DIR,
         run_parse_cycle=run_parse_cycle,
     )

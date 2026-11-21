@@ -2,16 +2,18 @@ import hashlib
 import hmac
 import html
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 ADMIN_USER = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASS = os.getenv("ADMIN_PASSWORD", "yagorod2026")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "ya-gorod-admin-secret-change-me")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://ya-gorod-api.onrender.com").rstrip("/")
 COOKIE_NAME = "yg_admin_session"
 
 
@@ -32,6 +34,19 @@ def _esc(val) -> str:
     return html.escape(str(val or ""))
 
 
+async def _save_upload(file: UploadFile | None, media_dir: str) -> str | None:
+    if not file or not file.filename:
+        return None
+    content = await file.read()
+    if not content:
+        return None
+    ext = os.path.splitext(file.filename)[1].lower() or ".jpg"
+    filename = f"{uuid.uuid4().hex}{ext}"
+    with open(os.path.join(media_dir, filename), "wb") as f:
+        f.write(content)
+    return f"{PUBLIC_BASE_URL}/media/{filename}"
+
+
 def create_admin_router(
     get_db: Callable,
     StoryDB,
@@ -39,6 +54,7 @@ def create_admin_router(
     EventDB,
     NewsDB,
     ProposalDB,
+    media_dir: str,
     private_dir: str,
     run_parse_cycle: Callable,
 ) -> APIRouter:
@@ -100,16 +116,17 @@ def create_admin_router(
         in_7 = (datetime.now(tz) + timedelta(days=7)).strftime("%Y-%m-%d")
 
         stories_rows = "".join(
-            f"<tr><td>{_esc(s.title)}</td><td>{'Видео' if s.is_video else 'Фото'}</td>"
+            f"<tr><td><b>{_esc(s.title)}</b><br><span class='muted'>{_esc((s.description or '')[:80])}</span></td>"
+            f"<td>{'Видео' if s.is_video else 'Фото'}</td>"
             f"<td><form method='post' action='/admin/stories/{_esc(s.id)}/delete'><button class='del'>Удалить</button></form></td></tr>"
             for s in stories
-        ) or "<tr><td colspan='3' class='muted'>Пусто (используются авто-сторис из новостей)</td></tr>"
+        ) or "<tr><td colspan='3' class='muted'>Своих сторис нет (показываются авто-сторис из новостей)</td></tr>"
 
         banners_rows = "".join(
             f"<tr><td><b>{_esc(b.title)}</b><br><span class='muted'>{_esc(b.subtitle)}</span></td>"
             f"<td><form method='post' action='/admin/banners/{_esc(b.id)}/delete'><button class='del'>Удалить</button></form></td></tr>"
             for b in banners
-        ) or "<tr><td colspan='2' class='muted'>Пусто (используются авто-баннеры)</td></tr>"
+        ) or "<tr><td colspan='2' class='muted'>Своих баннеров нет (показываются авто-баннеры)</td></tr>"
 
         events_rows = "".join(
             f"<tr><td><b>{_esc(e.title)}</b><br><span class='muted'>{_esc(e.category)} · {_esc(e.venue_name)}</span></td>"
@@ -147,8 +164,9 @@ def create_admin_router(
   .wrap{{max-width:1000px;margin:20px auto;padding:0 16px;display:grid;gap:20px}}
   .card{{background:#fff;padding:18px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.04)}}
   h2{{margin:0 0 12px;font-size:16px;color:#2B3A67}}
-  form.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:14px}}
-  input,select{{padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px}}
+  form.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:14px;align-items:center}}
+  input,select,textarea{{padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit}}
+  label.file-lbl{{font-size:12px;color:#374151;display:flex;flex-direction:column;gap:4px}}
   button{{padding:8px 14px;background:#2B3A67;color:#fff;border:0;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600}}
   button.del{{background:#ef4444;padding:5px 10px;font-size:12px}}
   button.sec{{background:#4b5563}}
@@ -166,23 +184,27 @@ def create_admin_router(
 </header>
 <div class="wrap">
   <div class="card">
-    <h2>Сторис ({len(stories)})</h2>
-    <form class="grid" method="post" action="/admin/stories">
+    <h2>Сторис ({len(stories)} своих + авто из новостей)</h2>
+    <form class="grid" method="post" action="/admin/stories" enctype="multipart/form-data">
       <input name="title" placeholder="Название" required>
-      <input name="preview_url" placeholder="URL обложки (https://...)" required>
-      <input name="media_url" placeholder="URL фото или видео" required>
+      <input name="description" placeholder="Текст описания (под кнопкой «Ещё»)">
       <select name="is_video"><option value="false">Фото</option><option value="true">Видео</option></select>
+      <label class="file-lbl">Файл медиа (фото/видео)<input type="file" name="media_file" accept="image/*,video/*"></label>
+      <input name="media_url" placeholder="или URL медиа (https://...)">
+      <label class="file-lbl">Файл обложки (необязательно)<input type="file" name="preview_file" accept="image/*"></label>
+      <input name="preview_url" placeholder="или URL обложки (необязательно)">
       <button type="submit">+ Добавить сторис</button>
     </form>
     <table>{stories_rows}</table>
   </div>
 
   <div class="card">
-    <h2>Баннеры ({len(banners)})</h2>
-    <form class="grid" method="post" action="/admin/banners">
+    <h2>Баннеры ({len(banners)} своих + авто)</h2>
+    <form class="grid" method="post" action="/admin/banners" enctype="multipart/form-data">
       <input name="title" placeholder="Заголовок" required>
       <input name="subtitle" placeholder="Подпись" required>
-      <input name="image_url" placeholder="URL картинки (https://...)" required>
+      <label class="file-lbl">Файл картинки<input type="file" name="image_file" accept="image/*"></label>
+      <input name="image_url" placeholder="или URL картинки (https://...)">
       <input name="target_url" placeholder="Ссылка (необязательно)">
       <button type="submit">+ Добавить баннер</button>
     </form>
@@ -191,7 +213,7 @@ def create_admin_router(
 
   <div class="card">
     <h2>Афиша мероприятий ({len(events)})</h2>
-    <form class="grid" method="post" action="/admin/events">
+    <form class="grid" method="post" action="/admin/events" enctype="multipart/form-data">
       <input name="title" placeholder="Название" required>
       <select name="category">
         <option>Концерт</option><option>Спектакль</option><option>Кинопоказ</option>
@@ -201,7 +223,8 @@ def create_admin_router(
       </select>
       <input name="venue_name" placeholder="Площадка" required>
       <input name="venue_address" placeholder="Адрес" value="г. Ноябрьск" required>
-      <input name="cover_url" placeholder="URL обложки (необязательно)">
+      <label class="file-lbl">Файл обложки<input type="file" name="cover_file" accept="image/*"></label>
+      <input name="cover_url" placeholder="или URL обложки">
       <input name="description" placeholder="Описание" required>
       <input name="period_start" type="date" value="{today}" required>
       <input name="period_end" type="date" value="{in_7}" required>
@@ -222,17 +245,32 @@ def create_admin_router(
 </div></body></html>"""
 
     @router.post("/stories")
-    def add_story(
+    async def add_story(
         title: str = Form(...),
-        preview_url: str = Form(...),
-        media_url: str = Form(...),
+        description: str = Form(""),
+        preview_url: str = Form(""),
+        media_url: str = Form(""),
         is_video: str = Form("false"),
+        preview_file: UploadFile | None = File(default=None),
+        media_file: UploadFile | None = File(default=None),
         yg_admin_session: str | None = Cookie(default=None),
         db: Session = Depends(get_db),
     ):
         if not _is_auth(yg_admin_session):
             raise HTTPException(status_code=401)
-        db.add(StoryDB(title=title.strip(), preview_url=preview_url.strip(), media_url=media_url.strip(), is_video=(is_video == "true")))
+        saved_media = await _save_upload(media_file, media_dir)
+        saved_preview = await _save_upload(preview_file, media_dir)
+        final_media = saved_media or media_url.strip() or None
+        final_preview = saved_preview or preview_url.strip() or final_media
+        if not final_media:
+            raise HTTPException(status_code=400, detail="Загрузите файл или укажите URL")
+        db.add(StoryDB(
+            title=title.strip(),
+            description=description.strip() or None,
+            preview_url=final_preview,
+            media_url=final_media,
+            is_video=(is_video == "true"),
+        ))
         db.commit()
         return RedirectResponse("/admin", status_code=303)
 
@@ -245,17 +283,25 @@ def create_admin_router(
         return RedirectResponse("/admin", status_code=303)
 
     @router.post("/banners")
-    def add_banner(
+    async def add_banner(
         title: str = Form(...),
         subtitle: str = Form(...),
-        image_url: str = Form(...),
+        image_url: str = Form(""),
         target_url: str = Form(""),
+        image_file: UploadFile | None = File(default=None),
         yg_admin_session: str | None = Cookie(default=None),
         db: Session = Depends(get_db),
     ):
         if not _is_auth(yg_admin_session):
             raise HTTPException(status_code=401)
-        db.add(BannerDB(title=title.strip(), subtitle=subtitle.strip(), image_url=image_url.strip(), target_url=target_url.strip() or None))
+        saved_img = await _save_upload(image_file, media_dir)
+        final_img = saved_img or image_url.strip() or None
+        db.add(BannerDB(
+            title=title.strip(),
+            subtitle=subtitle.strip(),
+            image_url=final_img,
+            target_url=target_url.strip() or None,
+        ))
         db.commit()
         return RedirectResponse("/admin", status_code=303)
 
@@ -268,7 +314,7 @@ def create_admin_router(
         return RedirectResponse("/admin", status_code=303)
 
     @router.post("/events")
-    def add_event(
+    async def add_event(
         title: str = Form(...),
         category: str = Form(...),
         venue_name: str = Form(...),
@@ -277,18 +323,20 @@ def create_admin_router(
         cover_url: str = Form(""),
         period_start: str = Form(...),
         period_end: str = Form(...),
+        cover_file: UploadFile | None = File(default=None),
         yg_admin_session: str | None = Cookie(default=None),
         db: Session = Depends(get_db),
     ):
         if not _is_auth(yg_admin_session):
             raise HTTPException(status_code=401)
+        saved_cover = await _save_upload(cover_file, media_dir)
         db.add(EventDB(
             title=title.strip(),
             category=category.strip(),
             venue_name=venue_name.strip(),
             venue_address=venue_address.strip(),
             description=description.strip(),
-            cover_url=cover_url.strip() or None,
+            cover_url=saved_cover or cover_url.strip() or None,
             schedule_type="period",
             period_start=period_start,
             period_end=period_end,
