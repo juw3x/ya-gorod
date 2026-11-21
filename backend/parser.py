@@ -11,8 +11,10 @@ AFISHA_CHANNELS = {"afisha_noyabrsk", "art_mikser"}
 OFFICIAL_CHANNELS = {"noyabrsk_adm", "yanao_ru"}
 
 STRONG_EVENT_KEYWORDS = (
-    "афиша", "билеты", "вход свободный", "приглашаем на",
-    "мастер-класс", "кинопоказ", "спектакль", "концерт", "выставка", "фестиваль", "ярмарка", "турнир", "приглашаем",
+    "афиша", "билеты", "вход свободный", "приглашаем",
+    "мастер-класс", "кинопоказ", "спектакль", "концерт",
+    "выставка", "фестиваль", "ярмарка", "турнир", "квартирник",
+    "состоится", "пройдет", "пройдёт",
 )
 
 PAST_TENSE_STOPWORDS = (
@@ -23,6 +25,7 @@ PAST_TENSE_STOPWORDS = (
 
 CATEGORY_MAP = {
     "концерт": "Концерт",
+    "квартирник": "Концерт",
     "спектакль": "Спектакль",
     "кино": "Кинопоказ",
     "выставк": "Выставка",
@@ -36,7 +39,7 @@ CATEGORY_MAP = {
 
 
 def get_channels() -> List[str]:
-    raw = os.getenv("TG_CHANNELS", "afisha_noyabrsk,noyabrsk_info,mig_noyabrsk")
+    raw = os.getenv("TG_CHANNELS", "art_mikser,yanao_ru,mig_noyabrsk,noyabrsk_info")
     return [c.strip().lstrip("@") for c in raw.split(",") if c.strip()]
 
 
@@ -72,10 +75,10 @@ def _extract_bg_url(el) -> Optional[str]:
 
 
 def _is_event_post(channel: str, text_lower: str) -> bool:
-    if any(sw in text_lower for sw in PAST_TENSE_STOPWORDS):
-        return False
     if channel.lower() in AFISHA_CHANNELS:
         return True
+    if any(sw in text_lower for sw in PAST_TENSE_STOPWORDS):
+        return False
     return any(k in text_lower for k in STRONG_EVENT_KEYWORDS)
 
 
@@ -89,6 +92,8 @@ async def fetch_channel_posts(channel: str) -> List[Dict]:
 
     soup = BeautifulSoup(resp.text, "html.parser")
     posts = []
+    is_afisha_ch = channel.lower() in AFISHA_CHANNELS
+
     for msg in soup.select(".tgme_widget_message_wrap"):
         link_el = msg.select_one("a.tgme_widget_message_date")
         text_el = msg.select_one(".tgme_widget_message_text")
@@ -99,14 +104,13 @@ async def fetch_channel_posts(channel: str) -> List[Dict]:
         for br in text_el.find_all("br"):
             br.replace_with("\n")
         raw_text = text_el.get_text("", strip=False).strip()
-        if len(raw_text) < 20:
+        if len(raw_text) < (5 if is_afisha_ch else 20):
             continue
 
         lines = [re.sub(r"\s+", " ", ln).strip() for ln in raw_text.splitlines()]
         text_lines = [ln for ln in lines if re.search(r"[А-Яа-яЁёA-Za-z0-9]{3,}", ln)]
         title = (text_lines[0] if text_lines else raw_text)[:110]
 
-        # Фото, обложки видео и превью ссылок
         cover_url = None
         gallery = []
         for photo in msg.select(".tgme_widget_message_photo_wrap"):
@@ -128,7 +132,6 @@ async def fetch_channel_posts(channel: str) -> List[Dict]:
                     cover_url = u
                     break
 
-        # Видео
         video_el = msg.select_one("video[src]")
         video_url = video_el.get("src") if video_el else None
         if not cover_url and video_el and video_el.get("poster"):
@@ -154,7 +157,9 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
     added_events = 0
     added_news = 0
     tz = timezone(timedelta(hours=5))
-    today_str = datetime.now(tz).strftime("%Y-%m-%d")
+    now_dt = datetime.now(tz)
+    today_str = now_dt.strftime("%Y-%m-%d")
+    end_str = (now_dt + timedelta(days=7)).strftime("%Y-%m-%d")
 
     for channel in get_channels():
         try:
@@ -174,7 +179,6 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
                     if p["video_url"]:
                         exists.video_url = p["video_url"]
                     continue
-                start_time = _extract_time(p["text"])
                 ev = EventDB(
                     title=p["title"],
                     category=_detect_category(text_lower),
@@ -187,8 +191,10 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
                     video_url=p["video_url"],
                     gallery_urls=p["gallery_urls"],
                     is_free="бесплатн" in text_lower or "вход свободный" in text_lower,
-                    schedule_type="single",
-                    sessions=[{"date": today_str, "startTime": start_time, "endTime": "23:59"}],
+                    schedule_type="period",
+                    period_start=today_str,
+                    period_end=end_str,
+                    sessions=[{"date": today_str, "startTime": _extract_time(p["text"]), "endTime": "23:59"}],
                     source_url=p["url"],
                 )
                 db.add(ev)
