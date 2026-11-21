@@ -1,5 +1,7 @@
 import asyncio
+import json
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -9,12 +11,28 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import JSON, text, Boolean, Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text, create_engine, text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://yagorod:yagorod@db:5432/yagorod")
 MEDIA_DIR = "/app/media"
+PRIVATE_PROPOSALS_DIR = "/app/private_proposals"
 os.makedirs(MEDIA_DIR, exist_ok=True)
+os.makedirs(PRIVATE_PROPOSALS_DIR, exist_ok=True)
+
+ALLOWED_CATEGORIES = {
+    "Концерт", "Спектакль", "Кинопоказ", "Выставка", "Экскурсия",
+    "Мастер-класс", "Обучение", "Фестиваль", "Ярмарка", "Спорт", "Другое",
+}
+ALLOWED_AGE_RATINGS = {"0+", "6+", "12+", "16+", "18+"}
+ALLOWED_EXTS = {
+    ".pdf", ".docx", ".doc", ".xlsx", ".xls",
+    ".jpeg", ".jpg", ".png", ".zip", ".rar", ".7z",
+}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_FILES_COUNT = 10
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -111,6 +129,96 @@ def get_db():
         db.close()
 
 
+def _validate_proposal_payload(data: dict) -> dict[str, str]:
+    errors: dict[str, str] = {}
+
+    def get_str(*keys: str) -> str:
+        for k in keys:
+            if k in data and data[k] is not None:
+                return str(data[k]).strip()
+        return ""
+
+    if not get_str("title"):
+        errors["title"] = "Укажите название мероприятия"
+    if not get_str("organizer"):
+        errors["organizer"] = "Укажите организатора"
+    if not get_str("description"):
+        errors["description"] = "Заполните описание"
+    if not get_str("address", "venue_address", "venueAddress"):
+        errors["address"] = "Укажите адрес проведения"
+    if not get_str("contact_name", "contactName", "fio"):
+        errors["contact_name"] = "Укажите ФИО контактного лица"
+    if not get_str("phone", "contact_phone", "contactPhone"):
+        errors["phone"] = "Укажите номер телефона"
+
+    cat = get_str("category")
+    if cat not in ALLOWED_CATEGORIES:
+        errors["category"] = "Выберите категорию из списка"
+
+    age = get_str("age_rating", "ageRating")
+    if age not in ALLOWED_AGE_RATINGS:
+        errors["age_rating"] = "Выберите возрастное ограничение"
+
+    for field, keys in (
+        ("venue_url", ("venue_url", "venueUrl", "map_url", "mapUrl")),
+        ("ticket_url", ("ticket_url", "ticketUrl")),
+    ):
+        val = get_str(*keys)
+        if val and not URL_RE.match(val):
+            errors[field] = "Ссылка должна начинаться с http:// или https://"
+
+    is_free = bool(data.get("is_free", data.get("isFree", False)))
+    if not is_free:
+        raw_price = data.get("price", data.get("min_price", data.get("minPrice")))
+        try:
+            price_val = int(raw_price)
+            if price_val <= 0:
+                errors["price"] = "Стоимость должна быть больше 0"
+        except (TypeError, ValueError):
+            errors["price"] = "Укажите корректную стоимость в рублях"
+
+    stype = get_str("schedule_type", "scheduleType") or "single"
+    if stype not in ("single", "multiple", "period"):
+        errors["schedule_type"] = "Некорректный тип расписания"
+    elif stype == "period":
+        p_start = get_str("period_start", "periodStart")
+        p_end = get_str("period_end", "periodEnd")
+        try:
+            d1 = datetime.strptime(p_start, "%Y-%m-%d").date()
+            d2 = datetime.strptime(p_end, "%Y-%m-%d").date()
+            if d2 < d1:
+                errors["period"] = "Дата окончания не может быть раньше даты начала"
+        except ValueError:
+            errors["period"] = "Укажите корректные даты начала и окончания (ГГГГ-ММ-ДД)"
+    else:
+        sessions = data.get("sessions") or []
+        if not isinstance(sessions, list) or len(sessions) == 0:
+            errors["sessions"] = "Добавьте хотя бы одну дату"
+        else:
+            for idx, s in enumerate(sessions):
+                if not isinstance(s, dict):
+                    errors[f"sessions.{idx}"] = "Некорректный формат сеанса"
+                    continue
+                d_str = str(s.get("date") or "").strip()
+                try:
+                    datetime.strptime(d_str, "%Y-%m-%d")
+                except ValueError:
+                    errors[f"sessions.{idx}.date"] = "Укажите корректную дату"
+                st = str(s.get("startTime") or s.get("start_time") or "").strip()
+                et = str(s.get("endTime") or s.get("end_time") or "").strip()
+                if st and not TIME_RE.match(st):
+                    errors[f"sessions.{idx}.startTime"] = "Формат времени: ЧЧ:ММ"
+                if et:
+                    if not TIME_RE.match(et):
+                        errors[f"sessions.{idx}.endTime"] = "Формат времени: ЧЧ:ММ"
+                    elif not st:
+                        errors[f"sessions.{idx}.startTime"] = "При указании времени окончания нужно время начала"
+                    elif et <= st:
+                        errors[f"sessions.{idx}.endTime"] = "Время окончания должно быть позже начала"
+
+    return errors
+
+
 from parser import run_parse_cycle
 
 
@@ -134,7 +242,6 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS source_url VARCHAR"))
         conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS content TEXT"))
         conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS video_url VARCHAR"))
-        # Удаляем старые заглушки (picsum / example.com)
         conn.execute(text("DELETE FROM stories WHERE preview_url LIKE '%picsum.photos%'"))
         conn.execute(text("DELETE FROM banners WHERE image_url LIKE '%picsum.photos%'"))
         conn.execute(text("DELETE FROM events WHERE source_url IS NULL AND cover_url LIKE '%picsum.photos%'"))
@@ -198,11 +305,14 @@ def list_news(category: str = "all", offset: int = 0, limit: int = 20, db: Sessi
 
 @app.post("/api/upload")
 async def upload_media(file: UploadFile = File(...)):
-    ext = os.path.splitext(file.filename or "")[1]
-    filename = f"{uuid.uuid4().hex}{ext}"
-    path = os.path.join(MEDIA_DIR, filename)
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTS:
+        raise HTTPException(status_code=400, detail=f"Неподдерживаемый формат файла: {ext}")
     content = await file.read()
-    with open(path, "wb") as f:
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Размер файла превышает 10 МБ")
+    filename = f"{uuid.uuid4().hex}{ext}"
+    with open(os.path.join(MEDIA_DIR, filename), "wb") as f:
         f.write(content)
     return {"url": f"/media/{filename}", "filename": filename, "size": len(content)}
 
@@ -213,25 +323,45 @@ async def create_proposal(
     files: List[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
-    import json
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON in payload")
+        raise HTTPException(status_code=400, detail="Некорректный JSON в заявке")
 
-    saved_urls = []
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Некорректный формат заявки")
+
+    errors = _validate_proposal_payload(data)
+    if len(files) > MAX_FILES_COUNT:
+        errors["files"] = f"Максимум {MAX_FILES_COUNT} вложений"
+
+    validated_files = []
     for file in files:
-        ext = os.path.splitext(file.filename or "")[1]
-        filename = f"{uuid.uuid4().hex}{ext}"
-        with open(os.path.join(MEDIA_DIR, filename), "wb") as f:
-            f.write(await file.read())
-        saved_urls.append(f"/media/{filename}")
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        if ext not in ALLOWED_EXTS:
+            errors["files"] = f"Неподдерживаемый формат файла: {file.filename}"
+            break
+        content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            errors["files"] = f"Файл {file.filename} превышает 10 МБ"
+            break
+        validated_files.append((ext, content))
 
-    proposal = ProposalDB(payload=data, file_urls=saved_urls)
+    if errors:
+        raise HTTPException(status_code=422, detail={"message": "Ошибка валидации заявки", "errors": errors})
+
+    saved_paths = []
+    for ext, content in validated_files:
+        filename = f"{uuid.uuid4().hex}{ext}"
+        with open(os.path.join(PRIVATE_PROPOSALS_DIR, filename), "wb") as f:
+            f.write(content)
+        saved_paths.append(f"private_proposals/{filename}")
+
+    proposal = ProposalDB(payload=data, file_urls=saved_paths)
     db.add(proposal)
     db.commit()
     db.refresh(proposal)
-    return {"id": proposal.id, "files": saved_urls}
+    return {"id": proposal.id, "files": saved_paths}
 
 
 @app.post("/api/parser/run")
