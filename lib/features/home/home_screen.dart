@@ -156,14 +156,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final displayed = _allEntries.take(_visibleCount).toList();
     final widgets = <Widget>[
       const SizedBox(height: 12),
-      StoriesSection(stories: _stories),
+      if (_stories.isNotEmpty) StoriesSection(stories: _stories),
       const SizedBox(height: 16),
-      BannerSlider(banners: _banners),
+      if (_banners.isNotEmpty) BannerSlider(banners: _banners),
       const SizedBox(height: 20),
       Padding(
         key: _afishaKey,
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: const Text('Афиша мероприятий', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        child: const Text('Афиша города', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
       ),
       const SizedBox(height: 12),
     ];

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/widgets/main_shell.dart';
+import '../not_found/not_found_screen.dart';
 
 class _PageBlock {
   final String? heading;
@@ -17,7 +18,8 @@ class StaticPageScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final page = _pages[slug] ?? _pages['privacy']!;
+    final page = _pages[slug];
+    if (page == null) return const NotFoundScreen();
 
     return Scaffold(
       backgroundColor: Colors.white,

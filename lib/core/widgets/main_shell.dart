@@ -24,9 +24,20 @@ class MainShell extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0.5,
-        title: const Text(
-          'Я-Город',
-          style: TextStyle(color: Color(0xFF2B3A67), fontWeight: FontWeight.w800, fontSize: 20),
+        title: Row(
+          children: [
+            const Text(
+              'Я-Город',
+              style: TextStyle(color: Color(0xFF2B3A67), fontWeight: FontWeight.w800, fontSize: 20),
+            ),
+            const SizedBox(width: 10),
+            Container(width: 1, height: 18, color: Colors.black12),
+            const SizedBox(width: 10),
+            const Text(
+              'Ноябрьск',
+              style: TextStyle(color: Colors.black54, fontWeight: FontWeight.w500, fontSize: 15),
+            ),
+          ],
         ),
         iconTheme: const IconThemeData(color: Colors.black87),
       ),
@@ -81,43 +92,81 @@ class AppDrawer extends StatelessWidget {
 
   const AppDrawer({super.key, required this.onSelectTab, required this.onSelectAfisha});
 
+  Widget _sectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+      child: Text(
+        title,
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.black45, letterSpacing: 0.8),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Drawer(
       backgroundColor: Colors.white,
       child: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
-                'Я-Город',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Color(0xFF2B3A67)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Меню', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
               ),
             ),
-            const Divider(),
+            const Divider(height: 1),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 14, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Я-Город', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Color(0xFF2B3A67))),
+                  SizedBox(height: 2),
+                  Text('Городские события и возможности', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                ],
+              ),
+            ),
+            _sectionHeader('РАЗДЕЛЫ'),
             ListTile(
               leading: const Icon(Icons.home_outlined),
               title: const Text('Главная'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.black38),
               onTap: () => onSelectTab(0),
             ),
             ListTile(
               leading: const Icon(Icons.event_outlined),
               title: const Text('Афиша мероприятий'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.black38),
               onTap: onSelectAfisha,
             ),
             ListTile(
               leading: const Icon(Icons.newspaper_outlined),
               title: const Text('Новости'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.black38),
               onTap: () => onSelectTab(1),
             ),
             ListTile(
               leading: const Icon(Icons.add_box_outlined),
               title: const Text('Предложить мероприятие'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.black38),
               onTap: () => onSelectTab(2),
             ),
             const Divider(),
+            _sectionHeader('ИНФОРМАЦИЯ'),
+            _docTile(context, 'Политика конфиденциальности', 'privacy'),
+            _docTile(context, 'Политика обработки персональных данных', 'personal-data'),
+            _docTile(context, 'Условия использования', 'terms'),
+            const Divider(),
+            _sectionHeader('КОНТАКТЫ'),
             ListTile(
               leading: const Icon(Icons.phone_outlined),
               title: const Text('+7 (3496) 00-00-00'),
@@ -134,10 +183,10 @@ class AppDrawer extends StatelessWidget {
               onTap: () => launchUrl(Uri.parse('https://max.ru'), mode: LaunchMode.externalApplication),
             ),
             const Divider(),
-            _docTile(context, 'Контакты', 'contacts'),
-            _docTile(context, 'Политика конфиденциальности', 'privacy'),
-            _docTile(context, 'Обработка персональных данных', 'personal-data'),
-            _docTile(context, 'Условия использования', 'terms'),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Text('© 2026 Я-Город · Ноябрьск', style: TextStyle(fontSize: 12, color: Colors.black45)),
+            ),
           ],
         ),
       ),
@@ -147,7 +196,8 @@ class AppDrawer extends StatelessWidget {
   Widget _docTile(BuildContext context, String title, String slug) {
     return ListTile(
       dense: true,
-      title: Text(title, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+      title: Text(title, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+      trailing: const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.black38),
       onTap: () {
         Navigator.pop(context);
         context.push('/page/$slug');
