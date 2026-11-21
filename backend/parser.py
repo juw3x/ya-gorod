@@ -7,13 +7,19 @@ import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
-EVENT_KEYWORDS = (
-    "афиша", "концерт", "выставка", "спектакль", "мастер-класс",
-    "фестиваль", "кинопоказ", "турнир", "соревнован", "ярмарка",
-    "билеты", "вход свободный", "приглашаем", "состоится",
+AFISHA_CHANNELS = {"afisha_noyabrsk"}
+OFFICIAL_CHANNELS = {"noyabrsk_adm", "yanao_ru"}
+
+STRONG_EVENT_KEYWORDS = (
+    "афиша", "билеты", "вход свободный", "приглашаем на",
+    "мастер-класс", "кинопоказ", "спектакль", "концерт",
 )
 
-OFFICIAL_CHANNELS = {"noyabrsk_adm", "yanao_ru"}
+PAST_TENSE_STOPWORDS = (
+    "состоялся", "состоялась", "состоялись", "прошёл", "прошел",
+    "прошла", "прошли", "завершился", "завершилась", "подвели итоги",
+    "приняли участие", "победител", "наградили", "вчера ",
+)
 
 CATEGORY_MAP = {
     "концерт": "Концерт",
@@ -30,7 +36,7 @@ CATEGORY_MAP = {
 
 
 def get_channels() -> List[str]:
-    raw = os.getenv("TG_CHANNELS", "noyabrsk_adm,noyabrsk24")
+    raw = os.getenv("TG_CHANNELS", "afisha_noyabrsk,noyabrsk_info,mig_noyabrsk")
     return [c.strip().lstrip("@") for c in raw.split(",") if c.strip()]
 
 
@@ -57,6 +63,22 @@ def _format_ru_time(iso_str: Optional[str]) -> str:
     return dt.strftime("%d.%m в %H:%M")
 
 
+def _extract_bg_url(el) -> Optional[str]:
+    if not el:
+        return None
+    style = el.get("style", "")
+    m = re.search(r"url\(['\"]?(https?://[^'\")]+)['\"]?\)", style)
+    return m.group(1) if m else None
+
+
+def _is_event_post(channel: str, text_lower: str) -> bool:
+    if any(sw in text_lower for sw in PAST_TENSE_STOPWORDS):
+        return False
+    if channel.lower() in AFISHA_CHANNELS:
+        return True
+    return any(k in text_lower for k in STRONG_EVENT_KEYWORDS)
+
+
 async def fetch_channel_posts(channel: str) -> List[Dict]:
     url = f"https://t.me/s/{channel}"
     headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
@@ -74,28 +96,43 @@ async def fetch_channel_posts(channel: str) -> List[Dict]:
             continue
 
         post_url = link_el.get("href", "")
-        raw_text = text_el.get_text("\n", strip=True)
+        for br in text_el.find_all("br"):
+            br.replace_with("\n")
+        raw_text = text_el.get_text("", strip=False).strip()
         if len(raw_text) < 20:
             continue
 
-        lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
-        title = lines[0][:110] if lines else raw_text[:110]
+        lines = [re.sub(r"\s+", " ", ln).strip() for ln in raw_text.splitlines()]
+        text_lines = [ln for ln in lines if re.search(r"[А-Яа-яЁёA-Za-z0-9]{3,}", ln)]
+        title = (text_lines[0] if text_lines else raw_text)[:110]
 
-        # Фото
+        # Фото, обложки видео и превью ссылок
         cover_url = None
         gallery = []
         for photo in msg.select(".tgme_widget_message_photo_wrap"):
-            style = photo.get("style", "")
-            m = re.search(r"url\(['\"]?(https?://[^'\")]+)['\"]?\)", style)
-            if m:
+            u = _extract_bg_url(photo)
+            if u:
                 if not cover_url:
-                    cover_url = m.group(1)
+                    cover_url = u
                 else:
-                    gallery.append(m.group(1))
+                    gallery.append(u)
+
+        if not cover_url:
+            for selector in (
+                ".tgme_widget_message_video_thumb",
+                ".tgme_widget_message_roundvideo_thumb",
+                ".link_preview_image",
+            ):
+                u = _extract_bg_url(msg.select_one(selector))
+                if u:
+                    cover_url = u
+                    break
 
         # Видео
         video_el = msg.select_one("video[src]")
         video_url = video_el.get("src") if video_el else None
+        if not cover_url and video_el and video_el.get("poster"):
+            cover_url = video_el.get("poster")
 
         time_el = msg.select_one("time[datetime]")
         iso_dt = time_el.get("datetime") if time_el else None
@@ -110,7 +147,7 @@ async def fetch_channel_posts(channel: str) -> List[Dict]:
             "gallery_urls": gallery,
             "iso_dt": iso_dt,
         })
-    return posts[-15:]  # берём последние 15 постов с канала
+    return posts[-15:]
 
 
 async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
@@ -127,11 +164,15 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
 
         for p in posts:
             text_lower = p["text"].lower()
-            is_event = any(k in text_lower for k in EVENT_KEYWORDS)
+            is_event = _is_event_post(channel, text_lower)
 
             if is_event:
                 exists = db.query(EventDB).filter(EventDB.source_url == p["url"]).first()
                 if exists:
+                    if not exists.cover_url and p["cover_url"]:
+                        exists.cover_url = p["cover_url"]
+                    if p["video_url"]:
+                        exists.video_url = p["video_url"]
                     continue
                 start_time = _extract_time(p["text"])
                 ev = EventDB(
@@ -155,13 +196,21 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
             else:
                 exists = db.query(NewsDB).filter(NewsDB.external_url == p["url"]).first()
                 if exists:
+                    if not exists.content:
+                        exists.content = p["text"]
+                    if not exists.cover_url and p["cover_url"]:
+                        exists.cover_url = p["cover_url"]
+                    if p["video_url"]:
+                        exists.video_url = p["video_url"]
                     continue
                 news = NewsDB(
                     title=p["title"],
+                    content=p["text"],
                     category="official" if channel in OFFICIAL_CHANNELS else "city",
                     published_at_label=_format_ru_time(p["iso_dt"]),
                     external_url=p["url"],
                     cover_url=p["cover_url"],
+                    video_url=p["video_url"],
                 )
                 db.add(news)
                 added_news += 1

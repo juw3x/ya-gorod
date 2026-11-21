@@ -2,7 +2,7 @@ import asyncio
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any, List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -21,7 +21,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-# --- Модели БД ---
 class StoryDB(Base):
     __tablename__ = "stories"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -56,8 +55,8 @@ class EventDB(Base):
     gallery_urls = Column(JSON, default=list)
     is_free = Column(Boolean, default=False)
     min_price = Column(Integer, nullable=True)
-    schedule_type = Column(String, default="single")  # single | multiple | period
-    sessions = Column(JSON, default=list)  # [{"date": "YYYY-MM-DD", "startTime": "19:00", "endTime": "21:00"}]
+    schedule_type = Column(String, default="single")
+    sessions = Column(JSON, default=list)
     period_start = Column(String, nullable=True)
     period_end = Column(String, nullable=True)
     source_url = Column(String, nullable=True, unique=True)
@@ -68,10 +67,12 @@ class NewsDB(Base):
     __tablename__ = "news"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String, nullable=False)
-    category = Column(String, default="city")  # official | city
+    content = Column(Text, nullable=True)
+    category = Column(String, default="city")
     published_at_label = Column(String, nullable=False)
     external_url = Column(String, nullable=False)
     cover_url = Column(String, nullable=True)
+    video_url = Column(String, nullable=True)
 
 
 class ProposalDB(Base):
@@ -82,7 +83,6 @@ class ProposalDB(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# --- Pydantic-схемы ---
 class EventCreate(BaseModel):
     title: str
     category: str
@@ -111,111 +111,8 @@ def get_db():
         db.close()
 
 
-def seed_initial_data():
-    db = SessionLocal()
-    try:
-        if db.query(EventDB).count() > 0:
-            return
-
-        now_noyabrsk = datetime.now(timezone(timedelta(hours=5)))
-        today = now_noyabrsk.strftime("%Y-%m-%d")
-        tomorrow = (now_noyabrsk + timedelta(days=1)).strftime("%Y-%m-%d")
-        in_7_days = (now_noyabrsk + timedelta(days=7)).strftime("%Y-%m-%d")
-
-        db.add_all([
-            StoryDB(
-                title="Выходные в Ноябрьске",
-                preview_url="https://picsum.photos/seed/story1/300/300",
-                media_url="https://picsum.photos/seed/story1full/720/1280",
-                is_video=False,
-            ),
-            StoryDB(
-                title="Анонс концерта (видео)",
-                preview_url="https://picsum.photos/seed/story2/300/300",
-                media_url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-                is_video=True,
-            ),
-            BannerDB(
-                title="Фестиваль искусств «Ямал»",
-                subtitle="Главные события недели в Ноябрьске",
-                image_url="https://picsum.photos/seed/banner1/900/400",
-                target_url="https://example.com/festival",
-            ),
-            BannerDB(
-                title="Ноябрьск-Парк приглашает",
-                subtitle="Каток, ярмарка и семейная программа",
-                image_url="https://picsum.photos/seed/banner2/900/400",
-                target_url="https://example.com/park",
-            ),
-            EventDB(
-                title="Симфонический вечер при свечах",
-                category="Концерт",
-                age_rating="12+",
-                venue_name="ГДКиК «Русь»",
-                venue_address="ул. Советская, 79",
-                map_url="https://yandex.ru/maps/?text=Ноябрьск+Советская+79",
-                ticket_url="https://example.com/tickets/1",
-                description="Камерный оркестр исполнит мировые саундтреки и классические произведения в живом звуке.",
-                cover_url="https://picsum.photos/seed/concert/800/500",
-                video_url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-                gallery_urls=[
-                    "https://picsum.photos/seed/g1/800/500",
-                    "https://picsum.photos/seed/g2/800/500",
-                ],
-                is_free=False,
-                min_price=800,
-                schedule_type="single",
-                sessions=[{"date": today, "startTime": "19:00", "endTime": "23:59"}],
-            ),
-            EventDB(
-                title="Фотовыставка «Северное сияние»",
-                category="Выставка",
-                age_rating="0+",
-                venue_name="Музейный ресурсный центр",
-                venue_address="ул. Советская, 82",
-                map_url="https://yandex.ru/maps/?text=Ноябрьск+Советская+82",
-                description="Экспозиция лучших кадров ямальских фотографов. Вход свободный в часы работы музея.",
-                cover_url="https://picsum.photos/seed/aurora/800/500",
-                gallery_urls=["https://picsum.photos/seed/g3/800/500"],
-                is_free=True,
-                schedule_type="period",
-                period_start=today,
-                period_end=in_7_days,
-            ),
-            EventDB(
-                title="Мастер-класс по керамике",
-                category="Мастер-класс",
-                age_rating="6+",
-                venue_name="Арт-резиденция «Миксер»",
-                venue_address="ул. Советская, 27/1",
-                description="Создадим кружку ручной работы под руководством мастера.",
-                cover_url="https://picsum.photos/seed/clay/800/500",
-                is_free=False,
-                min_price=500,
-                schedule_type="single",
-                sessions=[{"date": tomorrow, "startTime": "14:00", "endTime": "16:30"}],
-            ),
-            NewsDB(
-                title="В Ноябрьске утвердили программу зимних мероприятий",
-                category="official",
-                published_at_label="Сегодня в 11:30",
-                external_url="https://example.com/news/1",
-                cover_url="https://picsum.photos/seed/news1/800/450",
-            ),
-            NewsDB(
-                title="В Ноябрьск-Парке открыли обновлённую фотозону",
-                category="city",
-                published_at_label="Вчера в 18:15",
-                external_url="https://example.com/news/2",
-                cover_url="https://picsum.photos/seed/news2/800/450",
-            ),
-        ])
-        db.commit()
-    finally:
-        db.close()
-
-
 from parser import run_parse_cycle
+
 
 async def _parser_background_loop():
     interval = int(os.getenv("PARSE_INTERVAL_SECONDS", "300"))
@@ -229,12 +126,19 @@ async def _parser_background_loop():
             db.close()
         await asyncio.sleep(interval)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS source_url VARCHAR"))
-    seed_initial_data()
+        conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS content TEXT"))
+        conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS video_url VARCHAR"))
+        # Удаляем старые заглушки (picsum / example.com)
+        conn.execute(text("DELETE FROM stories WHERE preview_url LIKE '%picsum.photos%'"))
+        conn.execute(text("DELETE FROM banners WHERE image_url LIKE '%picsum.photos%'"))
+        conn.execute(text("DELETE FROM events WHERE source_url IS NULL AND cover_url LIKE '%picsum.photos%'"))
+        conn.execute(text("DELETE FROM news WHERE external_url LIKE '%example.com%'"))
     task = asyncio.create_task(_parser_background_loop())
     yield
     task.cancel()
@@ -332,5 +236,14 @@ async def create_proposal(
 
 @app.post("/api/parser/run")
 async def trigger_parser(db: Session = Depends(get_db)):
+    result = await run_parse_cycle(db, EventDB, NewsDB)
+    return {"status": "ok", **result}
+
+
+@app.post("/api/parser/reset")
+async def reset_and_reparse(db: Session = Depends(get_db)):
+    db.query(EventDB).filter(EventDB.source_url.isnot(None)).delete()
+    db.query(NewsDB).delete()
+    db.commit()
     result = await run_parse_cycle(db, EventDB, NewsDB)
     return {"status": "ok", **result}
