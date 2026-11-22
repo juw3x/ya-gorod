@@ -50,7 +50,7 @@ CATEGORY_MAP = {
 
 
 def get_channels() -> List[str]:
-    raw = os.getenv("TG_CHANNELS", "yanao_ru,mig_noyabrsk,noyabrsk_info,afisha_nsk89")
+    raw = os.getenv("TG_CHANNELS", "yanao_ru,mig_noyabrsk,noyabrsk_info")
     return [c.strip().lstrip("@") for c in raw.split(",") if c.strip()]
 
 
@@ -268,7 +268,7 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
 
         for p in posts:
             text_lower = p["text"].lower()
-            is_event = _is_event_post(channel, text_lower)
+            is_event = False
 
             if is_event:
                 exists = db.query(EventDB).filter(EventDB.source_url == p["url"]).first()
