@@ -42,7 +42,7 @@ dependencies:
   file_picker: ^13.4.0
   url_launcher: ^6.3.3
   intl: ^0.20.2
-  cached_network_image: ^4.0.7
+  cached_network_image: ^4.0.3
 
 dev_dependencies:
   flutter_test:
