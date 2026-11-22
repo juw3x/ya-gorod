@@ -39,12 +39,12 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build apk --release --dart-define=API_URL=https://ya-gorod-api.onrender.com
+      - run: flutter build apk --release --dart-define=API_URL=https://ya-gorod-api.onrender.com && cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Ya-Gorod.apk
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: ya-gorod-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/Ya-Gorod.apk
 
   build-and-push-docker:
     name: Build & Push Docker Image
