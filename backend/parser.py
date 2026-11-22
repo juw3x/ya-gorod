@@ -244,3 +244,36 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
 
     db.commit()
     return {"added_events": added_events, "added_news": added_news}
+
+
+async def fetch_single_post_media(post_url: str) -> Dict[str, Optional[str]]:
+    if not post_url:
+        return {"cover_url": None, "video_url": None}
+    embed_url = post_url.split("?")[0] + "?embed=1"
+    headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        resp = await client.get(embed_url, headers=headers)
+        if resp.status_code != 200:
+            return {"cover_url": None, "video_url": None}
+    soup = BeautifulSoup(resp.text, "html.parser")
+    cover_url = None
+    for photo in soup.select(".tgme_widget_message_photo_wrap"):
+        u = _extract_bg_url(photo)
+        if u:
+            cover_url = u
+            break
+    if not cover_url:
+        for selector in (
+            ".tgme_widget_message_video_thumb",
+            ".tgme_widget_message_roundvideo_thumb",
+            ".link_preview_image",
+        ):
+            u = _extract_bg_url(soup.select_one(selector))
+            if u:
+                cover_url = u
+                break
+    video_el = soup.select_one("video[src]")
+    video_url = video_el.get("src") if video_el else None
+    if not cover_url and video_el and video_el.get("poster"):
+        cover_url = video_el.get("poster")
+    return {"cover_url": cover_url, "video_url": video_url}

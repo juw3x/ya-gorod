@@ -324,7 +324,7 @@ def _serialize_model(obj):
 
 
 @app.api_route("/api/proxy", methods=["GET", "HEAD"])
-async def proxy_media(url: str, request: Request):
+async def proxy_media(url: str, request: Request, db: Session = Depends(get_db)):
     host = (urlparse(url).hostname or "").lower()
     if not any(host == h or host.endswith("." + h) for h in ALLOWED_PROXY_HOSTS):
         raise HTTPException(status_code=403, detail="Host not allowed")
@@ -340,6 +340,46 @@ async def proxy_media(url: str, request: Request):
     except Exception:
         await client.aclose()
         raise HTTPException(status_code=502, detail="Upstream error")
+
+    if upstream.status_code in (403, 404, 410):
+        await upstream.aclose()
+        from parser import fetch_single_post_media
+
+        is_video = False
+        post_url = None
+        record = db.query(NewsDB).filter((NewsDB.cover_url == url) | (NewsDB.video_url == url)).first()
+        if record:
+            is_video = (record.video_url == url)
+            post_url = record.external_url
+        else:
+            record = db.query(EventDB).filter((EventDB.cover_url == url) | (EventDB.video_url == url)).first()
+            if record:
+                is_video = (record.video_url == url)
+                post_url = record.source_url
+
+        fresh_url = None
+        if record and post_url:
+            try:
+                fresh = await fetch_single_post_media(post_url)
+                if fresh["cover_url"]:
+                    record.cover_url = fresh["cover_url"]
+                if fresh["video_url"]:
+                    record.video_url = fresh["video_url"]
+                db.commit()
+                fresh_url = fresh["video_url"] if is_video else fresh["cover_url"]
+            except Exception:
+                pass
+
+        if fresh_url:
+            try:
+                req = client.build_request(request.method, fresh_url, headers=headers)
+                upstream = await client.send(req, stream=True)
+            except Exception:
+                await client.aclose()
+                raise HTTPException(status_code=502, detail="Upstream refresh error")
+        else:
+            await client.aclose()
+            raise HTTPException(status_code=404, detail="Media expired")
 
     resp_headers = {"Cache-Control": "public, max-age=3600" if upstream.status_code in (200, 206) else "no-store"}
     for h in ("content-type", "content-length", "content-range", "accept-ranges"):
