@@ -482,8 +482,8 @@ def list_news(category: str = "all", offset: int = 0, limit: int = 20, db: Sessi
     if category in ("official", "city"):
         q = q.filter(NewsDB.category == category)
     total = q.count()
-    items = q.offset(offset).limit(limit).all()
-    return {"total": total, "items": items}
+    items = q.order_by(NewsDB.updated_at.desc()).offset(offset).limit(limit).all()
+    return {"total": total, "items": [_serialize_model(n) for n in items]}
 
 
 @app.post("/api/upload")

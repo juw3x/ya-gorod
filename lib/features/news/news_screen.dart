@@ -337,14 +337,12 @@ class _NewsCard extends StatelessWidget {
             if (hasVideo)
               _InlineVideoBox(videoUrl: item.videoUrl!, coverUrl: item.coverUrl, height: 190)
             else if (hasCover)
-              SizedBox(
+              Image.network(
+                item.coverUrl!,
                 height: 170,
                 width: double.infinity,
-                child: Image.network(
-                  item.coverUrl!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
               ),
             Padding(
               padding: const EdgeInsets.all(14),
