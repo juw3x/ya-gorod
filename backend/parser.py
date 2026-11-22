@@ -168,6 +168,90 @@ async def fetch_channel_posts(channel: str) -> List[Dict]:
     return posts[-15:]
 
 
+
+
+RU_MONTHS = {
+    "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
+    "мая": 5, "июня": 6, "июля": 7, "августа": 8,
+    "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+}
+
+
+def _parse_ru_date_time(date_str: str, now_dt: datetime):
+    date_iso = now_dt.strftime("%Y-%m-%d")
+    time_str = _extract_time(date_str)
+    m = re.search(r"(\d{1,2})\s+([а-яё]+)", date_str.lower())
+    if m:
+        day = int(m.group(1))
+        month = RU_MONTHS.get(m.group(2))
+        if month:
+            year = now_dt.year + (1 if month < now_dt.month - 1 else 0)
+            try:
+                date_iso = datetime(year, month, day).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+    return date_iso, time_str
+
+
+async def fetch_rus_noyabrsk_events() -> List[Dict]:
+    url = "https://rus-noyabrsk.ru/afisha/"
+    headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        resp = await client.get(url, headers=headers)
+        if resp.status_code != 200:
+            return []
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    events = []
+    for card in soup.select("article.event-card"):
+        title_el = card.select_one("h3 a")
+        if not title_el:
+            continue
+        title = title_el.get_text(" ", strip=True)
+        link = title_el.get("href", "").strip()
+        if not link:
+            continue
+
+        img_el = card.select_one(".event-card__image img")
+        cover_url = img_el.get("src") if img_el else None
+
+        age_el = card.select_one(".event-card__image span")
+        age_rating = age_el.get_text(strip=True) if age_el else "0+"
+
+        kicker_el = card.select_one(".event-kicker")
+        kicker = kicker_el.get_text(strip=True) if kicker_el else "Мероприятие"
+
+        date_el = card.select_one(".event-card__date")
+        date_text = date_el.get_text(" ", strip=True) if date_el else ""
+
+        venue_el = card.select_one(".event-card__venue")
+        venue = venue_el.get_text(" ", strip=True) if venue_el else "г. Ноябрьск, ГДКиК «Русь»"
+
+        price_el = card.select_one(".event-card__bottom span")
+        price_text = price_el.get_text(" ", strip=True) if price_el else ""
+
+        desc_parts = [f"{kicker}."]
+        if date_text:
+            desc_parts.append(f"Дата и время: {date_text}")
+        if venue:
+            desc_parts.append(f"Адрес: {venue}")
+        if price_text:
+            desc_parts.append(f"Билеты: {price_text}")
+
+        events.append({
+            "title": title[:120],
+            "url": link,
+            "cover_url": cover_url,
+            "age_rating": age_rating,
+            "kicker": kicker,
+            "date_text": date_text,
+            "venue": venue,
+            "price_text": price_text,
+            "description": "\n".join(desc_parts),
+        })
+    return events
+
+
 async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
     added_events = 0
     added_news = 0
