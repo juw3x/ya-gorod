@@ -85,6 +85,7 @@ class EventDB(Base):
     description = Column(Text, nullable=False)
     cover_url = Column(String, nullable=True)
     video_url = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
     gallery_urls = Column(JSON, default=list)
     is_free = Column(Boolean, default=False)
     min_price = Column(Integer, nullable=True)
@@ -106,6 +107,7 @@ class NewsDB(Base):
     external_url = Column(String, nullable=False)
     cover_url = Column(String, nullable=True)
     video_url = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ProposalDB(Base):
@@ -258,6 +260,8 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS content TEXT"))
         conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS video_url VARCHAR"))
         conn.execute(text("ALTER TABLE stories ADD COLUMN IF NOT EXISTS description TEXT"))
+        conn.execute(text("ALTER TABLE news ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
+        conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
         conn.execute(text("DELETE FROM stories WHERE preview_url LIKE '%picsum.photos%'"))
         conn.execute(text("DELETE FROM banners WHERE image_url LIKE '%picsum.photos%'"))
         conn.execute(text("DELETE FROM events WHERE source_url IS NULL AND cover_url LIKE '%picsum.photos%'"))
@@ -360,7 +364,7 @@ async def proxy_media(url: str, request: Request):
 
 @app.get("/api/home")
 def get_home(db: Session = Depends(get_db)):
-    events = db.query(EventDB).order_by(EventDB.created_at.desc()).all()
+    events = db.query(EventDB).order_by(EventDB.updated_at.desc()).all()
     manual_stories = [
         {
             "id": s.id,
@@ -372,7 +376,7 @@ def get_home(db: Session = Depends(get_db)):
         }
         for s in db.query(StoryDB).all()
     ]
-    news_media = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).limit(6).all()
+    news_media = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).order_by(NewsDB.updated_at.desc()).limit(6).all()
     auto_stories = [
         {
             "id": n.id,
@@ -397,7 +401,7 @@ def get_home(db: Session = Depends(get_db)):
     ]
     src = [e for e in events if e.cover_url][:3]
     if not src:
-        src = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).limit(3).all()
+        src = db.query(NewsDB).filter(NewsDB.cover_url.isnot(None)).order_by(NewsDB.updated_at.desc()).limit(3).all()
     auto_banners = [
         {
             "id": item.id,

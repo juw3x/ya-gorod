@@ -189,6 +189,7 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
             if is_event:
                 exists = db.query(EventDB).filter(EventDB.source_url == p["url"]).first()
                 if exists:
+                    exists.updated_at = datetime.utcnow()
                     if p["cover_url"]:
                         exists.cover_url = p["cover_url"]
                     if p["video_url"]:
@@ -221,6 +222,7 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
                 if exists:
                     if not exists.content:
                         exists.content = p["text"]
+                    exists.updated_at = datetime.utcnow()
                     if p["cover_url"]:
                         exists.cover_url = p["cover_url"]
                     if p["video_url"]:
