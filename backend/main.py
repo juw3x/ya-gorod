@@ -7,7 +7,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, List, Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
+from urllib.parse import quote, urlparse
+import httpx
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -275,7 +278,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/media/{file_id}")
+@app.api_route("/media/{file_id}", methods=["GET", "HEAD"])
 def get_media_file(file_id: str, db: Session = Depends(get_db)):
     item = db.query(MediaFileDB).filter(MediaFileDB.id == file_id).first()
     if not item:
@@ -290,6 +293,69 @@ def get_media_file(file_id: str, db: Session = Depends(get_db)):
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://ya-gorod-api.onrender.com").rstrip("/")
+ALLOWED_PROXY_HOSTS = ("telesco.pe", "cdn-telegram.org", "telegram.org")
+
+
+def _proxy_url(url: str | None) -> str | None:
+    if not url or not isinstance(url, str):
+        return url
+    host = (urlparse(url).hostname or "").lower()
+    if any(host == h or host.endswith("." + h) for h in ALLOWED_PROXY_HOSTS):
+        return f"{PUBLIC_BASE_URL}/api/proxy?url={quote(url, safe='')}"
+    return url
+
+
+def _serialize_model(obj):
+    data = {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+    for k in ("cover_url", "video_url", "preview_url", "media_url", "image_url"):
+        if k in data and data[k]:
+            data[k] = _proxy_url(data[k])
+    if "gallery_urls" in data and isinstance(data["gallery_urls"], list):
+        data["gallery_urls"] = [_proxy_url(u) for u in data["gallery_urls"]]
+    return data
+
+
+@app.api_route("/api/proxy", methods=["GET", "HEAD"])
+async def proxy_media(url: str, request: Request):
+    host = (urlparse(url).hostname or "").lower()
+    if not any(host == h or host.endswith("." + h) for h in ALLOWED_PROXY_HOSTS):
+        raise HTTPException(status_code=403, detail="Host not allowed")
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    if "range" in request.headers:
+        headers["Range"] = request.headers["range"]
+
+    client = httpx.AsyncClient(follow_redirects=True, timeout=30.0)
+    try:
+        req = client.build_request(request.method, url, headers=headers)
+        upstream = await client.send(req, stream=True)
+    except Exception:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail="Upstream error")
+
+    resp_headers = {"Cache-Control": "public, max-age=86400"}
+    for h in ("content-type", "content-length", "content-range", "accept-ranges"):
+        if h in upstream.headers:
+            resp_headers[h] = upstream.headers[h]
+
+    async def _iter():
+        try:
+            async for chunk in upstream.aiter_bytes(chunk_size=65536):
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        _iter(),
+        status_code=upstream.status_code,
+        headers=resp_headers,
+        media_type=upstream.headers.get("content-type"),
+    )
 
 
 @app.get("/api/home")
@@ -311,8 +377,8 @@ def get_home(db: Session = Depends(get_db)):
         {
             "id": n.id,
             "title": n.title[:28] + ("…" if len(n.title) > 28 else ""),
-            "preview_url": n.cover_url,
-            "media_url": n.video_url or n.cover_url,
+            "preview_url": _proxy_url(n.cover_url),
+            "media_url": _proxy_url(n.video_url or n.cover_url),
             "is_video": bool(n.video_url),
             "description": n.content or n.title,
         }
@@ -337,7 +403,7 @@ def get_home(db: Session = Depends(get_db)):
             "id": item.id,
             "title": item.title[:50],
             "subtitle": getattr(item, "venue_name", None) or getattr(item, "published_at_label", "Ноябрьск"),
-            "image_url": item.cover_url,
+            "image_url": _proxy_url(item.cover_url),
             "target_url": getattr(item, "ticket_url", None) or getattr(item, "external_url", None),
         }
         for item in src
@@ -346,7 +412,7 @@ def get_home(db: Session = Depends(get_db)):
     return {
         "stories": manual_stories + auto_stories,
         "banners": manual_banners + auto_banners,
-        "events": events,
+        "events": [_serialize_model(e) for e in events],
     }
 
 
