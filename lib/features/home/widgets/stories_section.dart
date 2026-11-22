@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../../../data/models/home_models.dart';
@@ -20,7 +21,22 @@ class StoriesSection extends StatelessWidget {
           final story = stories[index];
           return GestureDetector(
             onTap: () => Navigator.of(context, rootNavigator: true).push(
-              MaterialPageRoute(builder: (_) => _StoryViewer(stories: stories, initialIndex: index)),
+              PageRouteBuilder(
+                opaque: false,
+                transitionDuration: const Duration(milliseconds: 280),
+                reverseTransitionDuration: const Duration(milliseconds: 220),
+                pageBuilder: (_, __, ___) => _StoryViewer(stories: stories, initialIndex: index),
+                transitionsBuilder: (_, animation, __, child) {
+                  final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+                  return FadeTransition(
+                    opacity: curved,
+                    child: ScaleTransition(
+                      scale: Tween<double>(begin: 0.94, end: 1.0).animate(curved),
+                      child: child,
+                    ),
+                  );
+                },
+              ),
             ),
             child: SizedBox(
               width: 78,
@@ -36,10 +52,11 @@ class StoriesSection extends StatelessWidget {
                     ),
                     child: ClipOval(
                       child: story.previewUrl != null
-                          ? Image.network(
-                              story.previewUrl!,
+                          ? CachedNetworkImage(
+                              imageUrl: story.previewUrl!,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _fallbackIcon(story.isVideo),
+                              fadeInDuration: const Duration(milliseconds: 180),
+                              errorWidget: (_, __, ___) => _fallbackIcon(story.isVideo),
                             )
                           : _fallbackIcon(story.isVideo),
                     ),
@@ -147,12 +164,13 @@ class _StoryViewerState extends State<_StoryViewer> {
                       child: VideoPlayer(_videoController!),
                     )
                   : (story.mediaUrl ?? story.previewUrl) != null
-                      ? Image.network(
-                          (story.mediaUrl ?? story.previewUrl)!,
+                      ? CachedNetworkImage(
+                          imageUrl: (story.mediaUrl ?? story.previewUrl)!,
                           fit: BoxFit.contain,
                           width: double.infinity,
                           height: double.infinity,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54, size: 48),
+                          fadeInDuration: const Duration(milliseconds: 200),
+                          errorWidget: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54, size: 48),
                         )
                       : const Icon(Icons.auto_awesome, color: Colors.white54, size: 48),
             ),
@@ -205,44 +223,63 @@ class _StoryViewerState extends State<_StoryViewer> {
               ),
             ),
 
-            // Нижний блок с затемнением и раскрывающимся текстом
+            // Нижний блок с мягким градиентом и плавно раскрывающимся текстом
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                padding: const EdgeInsets.fromLTRB(16, 28, 16, 18),
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOutCubic,
+                padding: EdgeInsets.fromLTRB(16, _isExpanded ? 56 : 36, 16, 18),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
+                    stops: _isExpanded ? const [0.0, 0.25, 1.0] : const [0.0, 0.45, 1.0],
                     colors: _isExpanded
-                        ? [Colors.black.withValues(alpha: 0.78), Colors.black.withValues(alpha: 0.92)]
-                        : [Colors.transparent, Colors.black.withValues(alpha: 0.72), Colors.black.withValues(alpha: 0.88)],
+                        ? [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.72),
+                            Colors.black.withValues(alpha: 0.90),
+                          ]
+                        : [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.58),
+                            Colors.black.withValues(alpha: 0.82),
+                          ],
                   ),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (_isExpanded)
-                      ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.55),
-                        child: SingleChildScrollView(
-                          child: Text(
-                            fullText,
-                            style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.45),
-                          ),
-                        ),
-                      )
-                    else
-                      Text(
-                        fullText,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35, fontWeight: FontWeight.w500),
-                      ),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.bottomLeft,
+                      child: _isExpanded
+                          ? ConstrainedBox(
+                              constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.55),
+                              child: SingleChildScrollView(
+                                child: Text(
+                                  fullText,
+                                  style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.45),
+                                ),
+                              ),
+                            )
+                          : Text(
+                              fullText,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                height: 1.35,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                    ),
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
