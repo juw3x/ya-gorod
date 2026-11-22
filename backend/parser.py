@@ -263,12 +263,14 @@ async def fetch_single_post_media(post_url: str) -> Dict[str, Optional[str]]:
             return {"cover_url": None, "video_url": None}
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    target_msg = None
-    for msg in soup.select(".tgme_widget_message_wrap"):
-        link_el = msg.select_one("a.tgme_widget_message_date")
-        if link_el and (link_el.get("href") or "").rstrip("/").endswith(f"/{msg_id}"):
-            target_msg = msg
-            break
+    target_msg = soup.select_one(f'[data-post="{channel}/{msg_id}"]')
+    if not target_msg:
+        for msg in soup.select(".tgme_widget_message_wrap"):
+            link_el = msg.select_one("a.tgme_widget_message_date")
+            href = (link_el.get("href") or "").split("?")[0].rstrip("/") if link_el else ""
+            if href.endswith(f"/{msg_id}"):
+                target_msg = msg
+                break
 
     if not target_msg:
         return {"cover_url": None, "video_url": None}
