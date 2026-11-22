@@ -249,15 +249,32 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
 async def fetch_single_post_media(post_url: str) -> Dict[str, Optional[str]]:
     if not post_url:
         return {"cover_url": None, "video_url": None}
-    embed_url = post_url.split("?")[0] + "?embed=1"
+    clean_url = post_url.split("?")[0].rstrip("/")
+    m = re.search(r"t\.me/([^/]+)/(\d+)$", clean_url)
+    if not m:
+        return {"cover_url": None, "video_url": None}
+    channel, msg_id = m.group(1), m.group(2)
+
+    s_url = f"https://t.me/s/{channel}/{msg_id}"
     headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-        resp = await client.get(embed_url, headers=headers)
+        resp = await client.get(s_url, headers=headers)
         if resp.status_code != 200:
             return {"cover_url": None, "video_url": None}
+
     soup = BeautifulSoup(resp.text, "html.parser")
+    target_msg = None
+    for msg in soup.select(".tgme_widget_message_wrap"):
+        link_el = msg.select_one("a.tgme_widget_message_date")
+        if link_el and (link_el.get("href") or "").rstrip("/").endswith(f"/{msg_id}"):
+            target_msg = msg
+            break
+
+    if not target_msg:
+        return {"cover_url": None, "video_url": None}
+
     cover_url = None
-    for photo in soup.select(".tgme_widget_message_photo_wrap"):
+    for photo in target_msg.select(".tgme_widget_message_photo_wrap"):
         u = _extract_bg_url(photo)
         if u:
             cover_url = u
@@ -268,12 +285,14 @@ async def fetch_single_post_media(post_url: str) -> Dict[str, Optional[str]]:
             ".tgme_widget_message_roundvideo_thumb",
             ".link_preview_image",
         ):
-            u = _extract_bg_url(soup.select_one(selector))
+            u = _extract_bg_url(target_msg.select_one(selector))
             if u:
                 cover_url = u
                 break
-    video_el = soup.select_one("video[src]")
+
+    video_el = target_msg.select_one("video[src]")
     video_url = video_el.get("src") if video_el else None
     if not cover_url and video_el and video_el.get("poster"):
         cover_url = video_el.get("poster")
+
     return {"cover_url": cover_url, "video_url": video_url}
