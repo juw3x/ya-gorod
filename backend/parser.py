@@ -189,10 +189,12 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
             if is_event:
                 exists = db.query(EventDB).filter(EventDB.source_url == p["url"]).first()
                 if exists:
-                    if not exists.cover_url and p["cover_url"]:
+                    if p["cover_url"]:
                         exists.cover_url = p["cover_url"]
                     if p["video_url"]:
                         exists.video_url = p["video_url"]
+                    if hasattr(exists, "gallery_urls") and p["gallery_urls"]:
+                        exists.gallery_urls = p["gallery_urls"]
                     continue
                 ev = EventDB(
                     title=p["title"],
@@ -219,10 +221,12 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
                 if exists:
                     if not exists.content:
                         exists.content = p["text"]
-                    if not exists.cover_url and p["cover_url"]:
+                    if p["cover_url"]:
                         exists.cover_url = p["cover_url"]
                     if p["video_url"]:
                         exists.video_url = p["video_url"]
+                    if hasattr(exists, "gallery_urls") and p["gallery_urls"]:
+                        exists.gallery_urls = p["gallery_urls"]
                     continue
                 news = NewsDB(
                     title=p["title"],

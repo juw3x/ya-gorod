@@ -337,7 +337,7 @@ async def proxy_media(url: str, request: Request):
         await client.aclose()
         raise HTTPException(status_code=502, detail="Upstream error")
 
-    resp_headers = {"Cache-Control": "public, max-age=86400"}
+    resp_headers = {"Cache-Control": "public, max-age=3600" if upstream.status_code in (200, 206) else "no-store"}
     for h in ("content-type", "content-length", "content-range", "accept-ranges"):
         if h in upstream.headers:
             resp_headers[h] = upstream.headers[h]
