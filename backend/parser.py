@@ -326,8 +326,52 @@ async def run_parse_cycle(db: Session, EventDB, NewsDB) -> Dict[str, int]:
                 db.add(news)
                 added_news += 1
 
+    rus_error = None
+    try:
+        rus_events = await fetch_rus_noyabrsk_events()
+        print(f"[rus_parser] parsed {len(rus_events)} events", flush=True)
+    except Exception as exc:
+        rus_error = repr(exc)
+        print(f"[rus_parser] ERROR: {rus_error}", flush=True)
+        rus_events = []
+
+    for e in rus_events:
+        date_iso, start_time = _parse_ru_date_time(e["date_text"], now_dt)
+        text_lower = f"{e['title']} {e['kicker']}".lower()
+        is_free = "бесплатн" in e["price_text"].lower() or e["price_text"].strip().startswith("0")
+        exists = db.query(EventDB).filter(EventDB.source_url == e["url"]).first()
+        if exists:
+            exists.updated_at = datetime.utcnow()
+            if e["cover_url"]:
+                exists.cover_url = e["cover_url"]
+            exists.description = e["description"]
+            exists.period_start = date_iso
+            exists.period_end = date_iso
+            exists.sessions = [{"date": date_iso, "startTime": start_time, "endTime": "23:59"}]
+            continue
+        ev = EventDB(
+            title=e["title"],
+            category=_detect_category(text_lower),
+            age_rating=e["age_rating"],
+            venue_name="ГДКиК «Русь» / КСЦ «Ямал»",
+            venue_address=e["venue"],
+            ticket_url=e["url"],
+            description=e["description"],
+            cover_url=e["cover_url"],
+            video_url=None,
+            gallery_urls=[],
+            is_free=is_free,
+            schedule_type="period",
+            period_start=date_iso,
+            period_end=date_iso,
+            sessions=[{"date": date_iso, "startTime": start_time, "endTime": "23:59"}],
+            source_url=e["url"],
+        )
+        db.add(ev)
+        added_events += 1
+
     db.commit()
-    return {"added_events": added_events, "added_news": added_news}
+    return {"added_events": added_events, "added_news": added_news, "rus_found": len(rus_events), "rus_error": rus_error}
 
 
 async def fetch_single_post_media(post_url: str) -> Dict[str, Optional[str]]:
