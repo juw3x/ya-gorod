@@ -7,11 +7,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, List, Optional
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text, create_engine, text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, LargeBinary, String, Text, create_engine, text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://yagorod:yagorod@db:5432/yagorod")
@@ -37,6 +38,16 @@ URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+
+class MediaFileDB(Base):
+    __tablename__ = "media_files"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    filename = Column(String, nullable=False)
+    content_type = Column(String, default="application/octet-stream")
+    data = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class StoryDB(Base):
@@ -255,6 +266,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Ya-Gorod API", version="1.0.0", lifespan=lifespan)
 
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -262,7 +275,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+@app.get("/media/{file_id}")
+def get_media_file(file_id: str, db: Session = Depends(get_db)):
+    item = db.query(MediaFileDB).filter(MediaFileDB.id == file_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return Response(
+        content=item.data,
+        media_type=item.content_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @app.get("/api/health")
@@ -438,6 +460,7 @@ app.include_router(
         EventDB=EventDB,
         NewsDB=NewsDB,
         ProposalDB=ProposalDB,
+        MediaFileDB=MediaFileDB,
         media_dir=MEDIA_DIR,
         private_dir=PRIVATE_PROPOSALS_DIR,
         run_parse_cycle=run_parse_cycle,

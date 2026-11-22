@@ -34,17 +34,22 @@ def _esc(val) -> str:
     return html.escape(str(val or ""))
 
 
-async def _save_upload(file: UploadFile | None, media_dir: str) -> str | None:
+async def _save_upload(file: UploadFile | None, db: Session, MediaFileDB) -> str | None:
     if not file or not file.filename:
         return None
     content = await file.read()
     if not content:
         return None
     ext = os.path.splitext(file.filename)[1].lower() or ".jpg"
-    filename = f"{uuid.uuid4().hex}{ext}"
-    with open(os.path.join(media_dir, filename), "wb") as f:
-        f.write(content)
-    return f"{PUBLIC_BASE_URL}/media/{filename}"
+    file_id = f"{uuid.uuid4().hex}{ext}"
+    db.add(MediaFileDB(
+        id=file_id,
+        filename=file.filename,
+        content_type=file.content_type or "application/octet-stream",
+        data=content,
+    ))
+    db.commit()
+    return f"{PUBLIC_BASE_URL}/media/{file_id}"
 
 
 def create_admin_router(
@@ -54,6 +59,7 @@ def create_admin_router(
     EventDB,
     NewsDB,
     ProposalDB,
+    MediaFileDB,
     media_dir: str,
     private_dir: str,
     run_parse_cycle: Callable,
@@ -258,8 +264,8 @@ def create_admin_router(
     ):
         if not _is_auth(yg_admin_session):
             raise HTTPException(status_code=401)
-        saved_media = await _save_upload(media_file, media_dir)
-        saved_preview = await _save_upload(preview_file, media_dir)
+        saved_media = await _save_upload(media_file, db, MediaFileDB)
+        saved_preview = await _save_upload(preview_file, db, MediaFileDB)
         final_media = saved_media or media_url.strip() or None
         final_preview = saved_preview or preview_url.strip() or final_media
         if not final_media:
@@ -294,7 +300,7 @@ def create_admin_router(
     ):
         if not _is_auth(yg_admin_session):
             raise HTTPException(status_code=401)
-        saved_img = await _save_upload(image_file, media_dir)
+        saved_img = await _save_upload(image_file, db, MediaFileDB)
         final_img = saved_img or image_url.strip() or None
         db.add(BannerDB(
             title=title.strip(),
@@ -329,7 +335,7 @@ def create_admin_router(
     ):
         if not _is_auth(yg_admin_session):
             raise HTTPException(status_code=401)
-        saved_cover = await _save_upload(cover_file, media_dir)
+        saved_cover = await _save_upload(cover_file, db, MediaFileDB)
         db.add(EventDB(
             title=title.strip(),
             category=category.strip(),
