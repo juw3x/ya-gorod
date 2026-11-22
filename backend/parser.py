@@ -7,7 +7,7 @@ import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
-AFISHA_CHANNELS = {"afisha_noyabrsk"}
+AFISHA_CHANNELS = {"afisha_noyabrsk", "afisha_nsk89"}
 OFFICIAL_CHANNELS = {"noyabrsk_adm", "yanao_ru"}
 
 EVENT_TOPICS = (
@@ -50,7 +50,7 @@ CATEGORY_MAP = {
 
 
 def get_channels() -> List[str]:
-    raw = os.getenv("TG_CHANNELS", "yanao_ru,mig_noyabrsk,noyabrsk_info")
+    raw = os.getenv("TG_CHANNELS", "yanao_ru,mig_noyabrsk,noyabrsk_info,afisha_nsk89")
     return [c.strip().lstrip("@") for c in raw.split(",") if c.strip()]
 
 
