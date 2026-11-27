@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
@@ -12,7 +13,7 @@ class NewsScreen extends StatefulWidget {
   State<NewsScreen> createState() => _NewsScreenState();
 }
 
-class _NewsScreenState extends State<NewsScreen> {
+class _NewsScreenState extends State<NewsScreen> with WidgetsBindingObserver {
   final ScrollController _scrollController = ScrollController();
   NewsCategory _selectedFilter = NewsCategory.all;
   int _total = 0;
@@ -21,12 +22,25 @@ class _NewsScreenState extends State<NewsScreen> {
   bool _isLoadingMore = false;
   String? _errorText;
   List<NewsItem> _loaded = [];
+  Timer? _autoRefreshTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     ScrollBus.newsTop.addListener(_onScrollToTop);
     _fetchNews(reset: true);
+    _autoRefreshTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => _fetchNews(reset: true, silent: true),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchNews(reset: true, silent: true);
+    }
   }
 
   void _onScrollToTop() {
@@ -35,16 +49,18 @@ class _NewsScreenState extends State<NewsScreen> {
     }
   }
 
-  Future<void> _fetchNews({required bool reset}) async {
+  Future<void> _fetchNews({required bool reset, bool silent = false}) async {
     final currentReq = ++_requestId;
-    setState(() {
-      _errorText = null;
-      if (reset) {
-        _isLoading = true;
-      } else {
-        _isLoadingMore = true;
-      }
-    });
+    if (!silent) {
+      setState(() {
+        _errorText = null;
+        if (reset) {
+          _isLoading = true;
+        } else {
+          _isLoadingMore = true;
+        }
+      });
+    }
 
     try {
       final page = await ApiRepository.fetchNews(
@@ -61,16 +77,20 @@ class _NewsScreenState extends State<NewsScreen> {
       });
     } catch (_) {
       if (!mounted || currentReq != _requestId) return;
-      setState(() {
-        _isLoading = false;
-        _isLoadingMore = false;
-        _errorText = 'Ошибка загрузки новостей. Попробуйте ещё раз.';
-      });
+      if (!silent) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingMore = false;
+          _errorText = 'Ошибка загрузки новостей. Попробуйте ещё раз.';
+        });
+      }
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoRefreshTimer?.cancel();
     ScrollBus.newsTop.removeListener(_onScrollToTop);
     _scrollController.dispose();
     super.dispose();

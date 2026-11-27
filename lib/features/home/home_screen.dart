@@ -30,7 +30,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _afishaKey = GlobalKey();
 
@@ -46,10 +46,18 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     ScrollBus.homeTop.addListener(_onScrollToTop);
     ScrollBus.homeAfisha.addListener(_onScrollToAfisha);
     _loadHome();
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 60), (_) => _loadHome(silent: true));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadHome(silent: true);
+    }
   }
 
   void _onScrollToTop() {
@@ -84,10 +92,12 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _loadError = 'Не удалось подключиться к API. Проверьте сеть и попробуйте снова.';
-      });
+      if (!silent) {
+        setState(() {
+          _isLoading = false;
+          _loadError = 'Не удалось подключиться к API. Проверьте сеть и попробуйте снова.';
+        });
+      }
     }
   }
 
@@ -122,6 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoRefreshTimer?.cancel();
     ScrollBus.homeTop.removeListener(_onScrollToTop);
     ScrollBus.homeAfisha.removeListener(_onScrollToAfisha);
